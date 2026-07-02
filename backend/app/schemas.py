@@ -281,6 +281,13 @@ class Citation(ApiSchema):
     excerpt: str
 
 
+class ChatAttachmentRead(ApiSchema):
+    id: str
+    title: str
+    file_name: str
+    index_status: str = "not_indexed"
+
+
 class ChatMessageRead(ApiSchema):
     id: str
     role: str
@@ -295,6 +302,7 @@ class ChatMessageRead(ApiSchema):
     created_at: str
     citations: list[Citation] = []
     image_data_urls: list[str] = []
+    attachments: list[ChatAttachmentRead] = []
     feedback: str | None = None
     feedback_reason: str | None = None
     feedback_updated_at: str | None = None
@@ -317,6 +325,7 @@ class ChatSessionRead(ApiSchema):
     enable_thinking: bool = True
     selected_knowledge_base_ids: list[str] = []
     attached_document_ids: list[str] = []
+    attached_documents: list[ChatAttachmentRead] = []
     messages: list[ChatMessageRead] = []
 
 

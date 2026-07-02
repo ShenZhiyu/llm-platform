@@ -43,6 +43,12 @@ type BackendMessage = {
   createdAt: string;
   citations?: BackendCitation[];
   imageDataUrls?: string[];
+  attachments?: {
+    id: string;
+    title: string;
+    fileName: string;
+    indexStatus: string;
+  }[];
   feedback?: 'like' | 'dislike' | null;
   feedbackReason?: string | null;
   feedbackUpdatedAt?: string | null;
@@ -65,6 +71,12 @@ type BackendSession = {
   enableThinking?: boolean;
   selectedKnowledgeBaseIds?: string[];
   attachedDocumentIds?: string[];
+  attachedDocuments?: {
+    id: string;
+    title: string;
+    fileName: string;
+    indexStatus: string;
+  }[];
   messages: BackendMessage[];
 };
 
@@ -162,6 +174,7 @@ function mapMessage(message: BackendMessage): ChatMessage {
     createdAt: message.createdAt,
     citations: message.citations ?? [],
     imageDataUrls: message.imageDataUrls ?? [],
+    attachments: message.attachments ?? [],
     feedback: message.feedback ?? null,
     feedbackReason: message.feedbackReason ?? null,
     feedbackUpdatedAt: message.feedbackUpdatedAt ?? null,
@@ -186,6 +199,7 @@ function mapSession(session: BackendSession): ChatSession {
     enableThinking: session.enableThinking ?? true,
     selectedKnowledgeBaseIds: session.selectedKnowledgeBaseIds ?? [],
     attachedDocumentIds: session.attachedDocumentIds ?? [],
+    attachedDocuments: session.attachedDocuments ?? [],
     messages: session.messages.map(mapMessage),
   };
 }
@@ -351,11 +365,10 @@ export const backendApi = {
     return mapSession(session);
   },
 
-  async uploadSessionAttachment(sessionId: string, file: File, knowledgeBaseId: string) {
+  async uploadSessionAttachment(sessionId: string, file: File) {
     const form = new FormData();
     form.append('file', file);
-    form.append('knowledgeBaseId', knowledgeBaseId);
-    return uploadForm<{ documentId: string; title: string; indexStatus: string }>(`/chat/sessions/${sessionId}/attachments`, form);
+    return uploadForm<{ documentId: string; title: string; fileName: string; indexStatus: string }>(`/chat/sessions/${sessionId}/attachments`, form);
   },
 
   async removeSessionAttachment(sessionId: string, documentId: string) {

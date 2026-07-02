@@ -5,7 +5,7 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from app.models import AuditLog, AuditRisk, RoleName, User
-from app.schemas import ChatMessageRead, Citation
+from app.schemas import ChatAttachmentRead, ChatMessageRead, Citation
 
 
 def now_text() -> str:
@@ -35,8 +35,11 @@ def write_audit(db: Session, user: User | None, action: str, resource: str, risk
 def parse_message(message) -> ChatMessageRead:
     raw = json.loads(message.citations_json or "[]")
     image_raw = json.loads(getattr(message, "images_json", "[]") or "[]")
+    attachment_raw = json.loads(getattr(message, "attachments_json", "[]") or "[]")
     if not isinstance(image_raw, list):
         image_raw = []
+    if not isinstance(attachment_raw, list):
+        attachment_raw = []
     citations = [
         Citation(
             id=item.get("id", ""),
@@ -63,6 +66,16 @@ def parse_message(message) -> ChatMessageRead:
         created_at=message.created_at,
         citations=citations,
         image_data_urls=[item for item in image_raw if isinstance(item, str)],
+        attachments=[
+            ChatAttachmentRead(
+                id=item.get("id", ""),
+                title=item.get("title", ""),
+                file_name=item.get("fileName") or item.get("file_name", ""),
+                index_status=item.get("indexStatus") or item.get("index_status", "not_indexed"),
+            )
+            for item in attachment_raw
+            if isinstance(item, dict)
+        ],
         feedback=getattr(message, "feedback", None),
         feedback_reason=getattr(message, "feedback_reason", None),
         feedback_updated_at=getattr(message, "feedback_updated_at", None),

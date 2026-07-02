@@ -218,6 +218,14 @@ class RAGIndex:
         document_ids: list[str] | None = None,
         top_k: int | None = None,
     ) -> list[KnowledgeSearchResult]:
+        if knowledge_base_ids and document_ids:
+            kb_results = self.search(db, query, knowledge_base_ids=knowledge_base_ids, top_k=top_k)
+            document_results = self.search(db, query, document_ids=document_ids, top_k=top_k)
+            merged: dict[str, KnowledgeSearchResult] = {}
+            for result in [*kb_results, *document_results]:
+                merged[result.chunk_id] = result
+            return self._rerank_results(query, list(merged.values()))[: top_k or self.settings.rag_top_k]
+
         collection = self._collection()
         if collection is None:
             return self._search_db_chunks(db, query, knowledge_base_ids, document_ids, top_k)
@@ -248,6 +256,7 @@ class RAGIndex:
                 continue
             document = db.get(KnowledgeDocument, chunk.document_id)
             kb = db.get(KnowledgeBase, chunk.knowledge_base_id)
+            knowledge_base_name = kb.name if kb else "会话临时附件"
             similarity = max(0, min(100, int((1 - float(distance)) * 100))) if distance is not None else 0
             output.append(
                 KnowledgeSearchResult(
@@ -255,7 +264,7 @@ class RAGIndex:
                     document_id=chunk.document_id,
                     knowledge_base_id=chunk.knowledge_base_id,
                     title=document.title if document else chunk.document_id,
-                    knowledge_base_name=kb.name if kb else chunk.knowledge_base_id,
+                    knowledge_base_name=knowledge_base_name,
                     similarity=similarity,
                     excerpt=chunk.text[:500],
                     page_label=chunk.page_label,
@@ -291,7 +300,7 @@ class RAGIndex:
         for score, chunk in scored[: top_k or self.settings.rag_top_k]:
             document = db.get(KnowledgeDocument, chunk.document_id)
             kb = db.get(KnowledgeBase, chunk.knowledge_base_id)
-            if document is None or kb is None or document.index_status != "indexed":
+            if document is None or document.index_status != "indexed":
                 continue
             output.append(
                 KnowledgeSearchResult(
@@ -299,7 +308,7 @@ class RAGIndex:
                     document_id=chunk.document_id,
                     knowledge_base_id=chunk.knowledge_base_id,
                     title=document.title,
-                    knowledge_base_name=kb.name,
+                    knowledge_base_name=kb.name if kb else "会话临时附件",
                     similarity=score,
                     excerpt=chunk.text[:500],
                     page_label=chunk.page_label,

@@ -324,6 +324,7 @@ class ChatMessage(Base):
     created_at: Mapped[str] = mapped_column(String(40), nullable=False)
     citations_json: Mapped[str] = mapped_column(Text, default="[]")
     images_json: Mapped[str] = mapped_column(Text, default="[]")
+    attachments_json: Mapped[str] = mapped_column(Text, default="[]")
     feedback: Mapped[str | None] = mapped_column(String(20), nullable=True)
     feedback_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     feedback_updated_at: Mapped[str | None] = mapped_column(String(40), nullable=True)

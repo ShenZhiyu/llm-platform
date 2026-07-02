@@ -2,7 +2,7 @@ import json
 from time import perf_counter
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -12,7 +12,7 @@ from app.api.utils import new_id, now_text, parse_message, write_audit
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models import AuditRisk, ChatMessage, ChatRole, ChatSession, DocumentStatus, KnowledgeBase, KnowledgeDocument, SecurityResult, User
-from app.schemas import ChatMessageCreate, ChatMessageEdit, ChatMessageFeedback, ChatSessionCreate, ChatSessionRead, ChatSessionSettingsUpdate, KnowledgeSearchResult
+from app.schemas import ChatAttachmentRead, ChatMessageCreate, ChatMessageEdit, ChatMessageFeedback, ChatSessionCreate, ChatSessionRead, ChatSessionSettingsUpdate, KnowledgeSearchResult
 from app.services.llm_client import LLMClientError, get_llm_client
 from app.services.rag_service import RAGIndex, RAGServiceError, copy_upload_to_document, save_upload
 
@@ -36,7 +36,11 @@ def set_json_list(session: ChatSession, field_name: str, values: list[str]) -> N
     setattr(session, field_name, json.dumps(unique_values, ensure_ascii=False))
 
 
-def to_session_read(session: ChatSession) -> ChatSessionRead:
+def to_session_read(session: ChatSession, db: Session | None = None) -> ChatSessionRead:
+    attached_document_ids = json_list(session.attached_document_ids_json)
+    attached_documents: list[ChatAttachmentRead] = []
+    if db is not None and attached_document_ids:
+        attached_documents = attachment_reads(db, attached_document_ids)
     return ChatSessionRead(
         id=session.id,
         user_id=session.user_id,
@@ -51,9 +55,26 @@ def to_session_read(session: ChatSession) -> ChatSessionRead:
         show_thinking=session.show_thinking,
         enable_thinking=session.enable_thinking,
         selected_knowledge_base_ids=json_list(session.selected_knowledge_base_ids_json),
-        attached_document_ids=json_list(session.attached_document_ids_json),
+        attached_document_ids=attached_document_ids,
+        attached_documents=attached_documents,
         messages=[parse_message(message) for message in session.messages],
     )
+
+
+def attachment_reads(db: Session, document_ids: list[str]) -> list[ChatAttachmentRead]:
+    if not document_ids:
+        return []
+    documents = list(db.scalars(select(KnowledgeDocument).where(KnowledgeDocument.id.in_(document_ids))).all())
+    document_by_id = {document.id: document for document in documents}
+    return [
+        ChatAttachmentRead(id=document.id, title=document.title, file_name=document.file_name, index_status=document.index_status)
+        for document_id in document_ids
+        if (document := document_by_id.get(document_id)) is not None
+    ]
+
+
+def attachments_json_for_message(db: Session, document_ids: list[str]) -> str:
+    return json.dumps([item.model_dump(by_alias=True) for item in attachment_reads(db, document_ids)], ensure_ascii=False)
 
 
 def fallback_answer() -> str:
@@ -188,13 +209,6 @@ def validate_knowledge_context(db: Session, payload: ChatMessageCreate) -> None:
         if invalid_document_ids:
             raise HTTPException(status_code=400, detail=f"Attached document is not indexed: {', '.join(invalid_document_ids)}")
 
-        if payload.knowledge_base_ids:
-            mismatched_document_ids = [
-                document.id for document in documents if document.knowledge_base_id not in set(payload.knowledge_base_ids)
-            ]
-            if mismatched_document_ids:
-                raise HTTPException(status_code=400, detail=f"Attached document is outside selected knowledge bases: {', '.join(mismatched_document_ids)}")
-
 
 def validate_knowledge_lists(db: Session, knowledge_base_ids: list[str], document_ids: list[str]) -> None:
     payload = ChatMessageCreate(content="", knowledge_base_ids=knowledge_base_ids, attached_document_ids=document_ids)
@@ -305,7 +319,7 @@ def list_sessions(current_user: User = Depends(get_current_user), db: Session = 
         .where(ChatSession.archived_at.is_(None))
         .order_by(ChatSession.updated_at.desc())
     ).all()
-    return [to_session_read(session) for session in sessions]
+    return [to_session_read(session, db) for session in sessions]
 
 
 @router.get("/sessions/archived", response_model=list[ChatSessionRead])
@@ -317,7 +331,7 @@ def list_archived_sessions(current_user: User = Depends(get_current_user), db: S
         .where(ChatSession.archived_at.is_not(None))
         .order_by(ChatSession.archived_at.desc())
     ).all()
-    return [to_session_read(session) for session in sessions]
+    return [to_session_read(session, db) for session in sessions]
 
 
 @router.delete("/sessions/archived", status_code=status.HTTP_204_NO_CONTENT)
@@ -339,7 +353,7 @@ def create_session(payload: ChatSessionCreate, current_user: User = Depends(get_
     db.add(session)
     db.commit()
     db.refresh(session)
-    return to_session_read(session)
+    return to_session_read(session, db)
 
 
 @router.patch("/sessions/{session_id}/settings", response_model=ChatSessionRead)
@@ -376,7 +390,7 @@ def update_session_settings(
     write_audit(db, current_user, "更新会话设置", session.title, AuditRisk.NORMAL, "会话模型参数、知识库或附件关联已更新。")
     db.commit()
     db.refresh(session)
-    return to_session_read(session)
+    return to_session_read(session, db)
 
 
 @router.delete("/sessions/{session_id}/attachments/{document_id}", response_model=ChatSessionRead)
@@ -395,31 +409,29 @@ def remove_session_attachment(
     write_audit(db, current_user, "移除会话附件关联", document_id, AuditRisk.NORMAL, "仅移除当前会话关联，不删除原始文档。")
     db.commit()
     db.refresh(session)
-    return to_session_read(session)
+    return to_session_read(session, db)
 
 
 @router.post("/sessions/{session_id}/attachments")
 def upload_session_attachment(
     session_id: str,
     file: UploadFile = File(...),
-    knowledge_base_id: str = Form(..., alias="knowledgeBaseId"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     session = db.scalar(select(ChatSession).where(ChatSession.id == session_id).where(ChatSession.user_id == current_user.id))
     if session is None:
         raise HTTPException(status_code=404, detail="Chat session not found")
-    if db.get(KnowledgeBase, knowledge_base_id) is None:
-        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    storage_namespace = f"session-{session.id}"
     try:
-        upload = save_upload(file, knowledge_base_id)
+        upload = save_upload(file, storage_namespace)
     except RAGServiceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     user = current_user
     document = KnowledgeDocument(
         id=new_id("doc"),
-        knowledge_base_id=knowledge_base_id,
+        knowledge_base_id="__session_attachment__",
         title=upload.file_name.rsplit(".", 1)[0],
         file_name=upload.file_name,
         status=DocumentStatus.INDEXED,
@@ -445,7 +457,7 @@ def upload_session_attachment(
         set_json_list(session, "attached_document_ids_json", attachment_ids)
     write_audit(db, user, "会话附件上传", upload.file_name, AuditRisk.NORMAL, "附件已解析并加入真实检索索引。")
     db.commit()
-    return {"documentId": document.id, "title": document.title, "indexStatus": document.index_status}
+    return {"documentId": document.id, "title": document.title, "fileName": document.file_name, "indexStatus": document.index_status}
 
 
 @router.delete("/sessions/{session_id}", response_model=ChatSessionRead)
@@ -460,7 +472,7 @@ def archive_session(session_id: str, current_user: User = Depends(get_current_us
     write_audit(db, user, "会话归档", session.title, AuditRisk.WARNING, "智能问答会话已移入归档。")
     db.commit()
     db.refresh(session)
-    return to_session_read(session)
+    return to_session_read(session, db)
 
 
 @router.post("/sessions/{session_id}/restore", response_model=ChatSessionRead)
@@ -474,7 +486,7 @@ def restore_session(session_id: str, current_user: User = Depends(get_current_us
     write_audit(db, user, "会话恢复", session.title, AuditRisk.NORMAL, "智能问答会话已从归档恢复。")
     db.commit()
     db.refresh(session)
-    return to_session_read(session)
+    return to_session_read(session, db)
 
 
 @router.delete("/sessions/{session_id}/hard-delete", status_code=status.HTTP_204_NO_CONTENT)
@@ -501,6 +513,7 @@ def send_message(session_id: str, payload: ChatMessageCreate, current_user: User
         raise HTTPException(status_code=400, detail="Archived chat session cannot receive new messages")
     validate_knowledge_context(db, payload)
     apply_payload_to_session(session, payload, db)
+    current_attachment_ids = session_attached_document_ids(session)
 
     user_message = ChatMessage(
         id=new_id("msg"),
@@ -510,6 +523,7 @@ def send_message(session_id: str, payload: ChatMessageCreate, current_user: User
         input_tokens=estimate_tokens(payload.content),
         created_at=now_text(),
         images_json=json.dumps(payload.image_data_urls, ensure_ascii=False),
+        attachments_json=attachments_json_for_message(db, current_attachment_ids),
     )
     try:
         result = run_llm_for_message(db, session, user_message)
@@ -532,13 +546,14 @@ def send_message(session_id: str, payload: ChatMessageCreate, current_user: User
     if len(session.messages) == 1:
         session.title = payload.content[:24] or "新的对话"
     session.messages.append(assistant_message)
+    set_json_list(session, "attached_document_ids_json", [])
     write_audit(db, current_user, "智能问答", f"会话 {session.title}", AuditRisk.NORMAL, audit_detail)
     db.commit()
     db.expire_all()
     refreshed = db.scalar(select(ChatSession).options(selectinload(ChatSession.messages)).where(ChatSession.id == session.id).where(ChatSession.user_id == current_user.id))
     if refreshed is None:
         raise HTTPException(status_code=404, detail="Chat session not found")
-    return to_session_read(refreshed)
+    return to_session_read(refreshed, db)
 
     rag_results: list[KnowledgeSearchResult] = []
     rag_error: str | None = None
@@ -570,6 +585,7 @@ def send_message(session_id: str, payload: ChatMessageCreate, current_user: User
         input_tokens=estimate_tokens(payload.content),
         created_at=now_text(),
         images_json=json.dumps(payload.image_data_urls, ensure_ascii=False),
+        attachments_json=attachments_json_for_message(db, payload.attached_document_ids),
     )
     started_at = perf_counter()
     try:
@@ -631,7 +647,7 @@ def send_message(session_id: str, payload: ChatMessageCreate, current_user: User
     refreshed = db.scalar(select(ChatSession).options(selectinload(ChatSession.messages)).where(ChatSession.id == session.id))
     if refreshed is None:
         raise HTTPException(status_code=404, detail="Chat session not found")
-    return to_session_read(refreshed)
+    return to_session_read(refreshed, db)
 
 
 def get_owned_message(db: Session, message_id: str, current_user: User) -> tuple[ChatSession, ChatMessage]:
@@ -682,7 +698,7 @@ def regenerate_message(assistant_message_id: str, current_user: User = Depends(g
     write_audit(db, current_user, "重新生成回答", session.title, AuditRisk.NORMAL, audit_detail)
     db.commit()
     db.refresh(session)
-    return to_session_read(session)
+    return to_session_read(session, db)
 
 
 @router.post("/messages/{assistant_message_id}/regenerate/stream")
@@ -799,7 +815,7 @@ def stream_regenerate_message(assistant_message_id: str, current_user: User = De
         if refreshed is None:
             yield sse_event({"type": "error", "message": "Chat session not found"})
             return
-        yield sse_event({"type": "done", "session": to_session_read(refreshed).model_dump(by_alias=True)})
+        yield sse_event({"type": "done", "session": to_session_read(refreshed, db).model_dump(by_alias=True)})
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -831,7 +847,7 @@ def edit_user_message(
     write_audit(db, current_user, "编辑用户消息", session.title, AuditRisk.NORMAL, audit_detail)
     db.commit()
     db.refresh(session)
-    return to_session_read(session)
+    return to_session_read(session, db)
 
 
 @router.post("/messages/{user_message_id}/edit/stream")
@@ -861,7 +877,7 @@ def stream_edit_user_message(
             write_audit(db, current_user, "编辑用户消息", session.title, AuditRisk.NORMAL, "用户消息已更新，未找到需要重算的回答。")
             db.commit()
             db.refresh(session)
-            yield sse_event({"type": "done", "session": to_session_read(session).model_dump(by_alias=True)})
+            yield sse_event({"type": "done", "session": to_session_read(session, db).model_dump(by_alias=True)})
             return
 
         rag_results: list[KnowledgeSearchResult] = []
@@ -965,7 +981,7 @@ def stream_edit_user_message(
         if refreshed is None:
             yield sse_event({"type": "error", "message": "Chat session not found"})
             return
-        yield sse_event({"type": "done", "session": to_session_read(refreshed).model_dump(by_alias=True)})
+        yield sse_event({"type": "done", "session": to_session_read(refreshed, db).model_dump(by_alias=True)})
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -986,7 +1002,7 @@ def feedback_message(
     write_audit(db, current_user, "回答反馈", session.title, AuditRisk.NORMAL, payload.feedback)
     db.commit()
     db.refresh(session)
-    return to_session_read(session)
+    return to_session_read(session, db)
 
 
 @router.post("/sessions/{session_id}/context-usage")
@@ -1073,6 +1089,7 @@ def stream_message(session_id: str, payload: ChatMessageCreate, current_user: Us
             input_tokens=estimate_tokens(payload.content),
             created_at=now_text(),
             images_json=json.dumps(payload.image_data_urls, ensure_ascii=False),
+            attachments_json=attachments_json_for_message(db, attached_document_ids),
         )
         assistant_message = ChatMessage(
             id=new_id("msg"),
@@ -1167,6 +1184,7 @@ def stream_message(session_id: str, payload: ChatMessageCreate, current_user: Us
         if len(session.messages) == 1:
             session.title = payload.content[:24]
         session.messages.append(assistant_message)
+        set_json_list(session, "attached_document_ids_json", [])
 
         user = current_user
         write_audit(db, user, "智能问答", f"会话 {session.title}", risk, audit_detail)
@@ -1177,6 +1195,6 @@ def stream_message(session_id: str, payload: ChatMessageCreate, current_user: Us
         if refreshed is None:
             yield sse_event({"type": "error", "message": "Chat session not found"})
             return
-        yield sse_event({"type": "done", "session": to_session_read(refreshed).model_dump(by_alias=True)})
+        yield sse_event({"type": "done", "session": to_session_read(refreshed, db).model_dump(by_alias=True)})
 
     return StreamingResponse(generate(), media_type="text/event-stream")

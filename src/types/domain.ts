@@ -34,11 +34,19 @@ export type ChatMessage = {
   createdAt: string;
   citations?: Citation[];
   imageDataUrls?: string[];
+  attachments?: ChatAttachment[];
   feedback?: 'like' | 'dislike' | null;
   feedbackReason?: string | null;
   feedbackUpdatedAt?: string | null;
   editedAt?: string | null;
   regeneratedAt?: string | null;
+};
+
+export type ChatAttachment = {
+  id: string;
+  title: string;
+  fileName: string;
+  indexStatus: string;
 };
 
 export type ChatSession = {
@@ -56,6 +64,7 @@ export type ChatSession = {
   enableThinking?: boolean;
   selectedKnowledgeBaseIds?: string[];
   attachedDocumentIds?: string[];
+  attachedDocuments?: ChatAttachment[];
   messages: ChatMessage[];
 };
 

@@ -50,6 +50,7 @@ def ensure_runtime_schema() -> None:
         "output_tokens": "INTEGER DEFAULT 0",
         "tokens_per_second": "REAL DEFAULT 0",
         "images_json": "TEXT DEFAULT '[]'",
+        "attachments_json": "TEXT DEFAULT '[]'",
         "feedback": "VARCHAR(20)",
         "feedback_reason": "TEXT",
         "feedback_updated_at": "VARCHAR(40)",

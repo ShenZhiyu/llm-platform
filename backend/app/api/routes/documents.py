@@ -30,7 +30,13 @@ def list_documents(
     current_user: User = Depends(require_roles(RoleName.RESEARCHER, RoleName.KB_ADMIN, RoleName.AUTH_ADMIN)),
     db: Session = Depends(get_db),
 ) -> list[KnowledgeDocument]:
-    return list(db.scalars(select(KnowledgeDocument).order_by(KnowledgeDocument.submitted_at.desc())).all())
+    return list(
+        db.scalars(
+            select(KnowledgeDocument)
+            .where(KnowledgeDocument.knowledge_base_id != "__session_attachment__")
+            .order_by(KnowledgeDocument.submitted_at.desc())
+        ).all()
+    )
 
 
 @router.post("", response_model=KnowledgeDocumentRead, status_code=status.HTTP_201_CREATED)

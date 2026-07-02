@@ -25,7 +25,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useAppContext } from '../AppContext';
 import { cn } from '../lib/utils';
 import { backendApi as api } from '../services/backendApi';
-import type { ChatMessage, ChatSession, KnowledgeBase } from '../types/domain';
+import type { ChatAttachment, ChatMessage, ChatSession, KnowledgeBase } from '../types/domain';
 
 export function Chat() {
   const { currentModel, user } = useAppContext();
@@ -96,6 +96,10 @@ export function Chat() {
     () => sessions.find((session) => session.id === activeSessionId) ?? sessions[0],
     [activeSessionId, sessions],
   );
+  const attachedDocuments =
+    activeSession?.attachedDocuments && activeSession.attachedDocuments.length > 0
+      ? activeSession.attachedDocuments
+      : attachedDocumentIds.map((documentId) => ({ id: documentId, title: documentId, fileName: documentId, indexStatus: '' }));
   const hasKnowledgeContext = selectedKnowledgeBaseIds.length > 0 || attachedDocumentIds.length > 0;
   const isVisionModel = currentModel.includes('VL');
 
@@ -242,12 +246,27 @@ export function Chat() {
   const sendContent = async (content: string, optimistic = true) => {
     if ((!content.trim() && imageDataUrls.length === 0) || !activeSession || !user) return;
     const imagesToSend = imageDataUrls;
+    const attachmentIdsToSend = attachedDocumentIds;
+    const attachmentsToSend: ChatAttachment[] = attachedDocuments;
     if (imagesToSend.length > 0) setImageDataUrls([]);
+    if (attachmentIdsToSend.length > 0) setAttachedDocumentIds([]);
     setGenerating(true);
     if (optimistic) {
       const optimisticSession: ChatSession = {
         ...activeSession,
-        messages: [...activeSession.messages, { id: `local-${Date.now()}`, role: 'user', content: content || '[image]', createdAt: 'just now', imageDataUrls: imagesToSend }],
+        attachedDocumentIds: [],
+        attachedDocuments: [],
+        messages: [
+          ...activeSession.messages,
+          {
+            id: `local-${Date.now()}`,
+            role: 'user',
+            content: content || '[image]',
+            createdAt: 'just now',
+            imageDataUrls: imagesToSend,
+            attachments: attachmentsToSend,
+          },
+        ],
       };
       setSessions((items) => items.map((item) => (item.id === activeSession.id ? optimisticSession : item)));
       scrollToLatestMessage();
@@ -266,7 +285,7 @@ export function Chat() {
           showThinking,
           enableThinking,
           knowledgeBaseIds: selectedKnowledgeBaseIds,
-          attachedDocumentIds,
+          attachedDocumentIds: attachmentIdsToSend,
           imageDataUrls: imagesToSend,
         },
         {
@@ -424,6 +443,8 @@ export function Chat() {
 
   const editMessage = async (messageId: string, content: string) => {
     const assistantMessageId = nextAssistantMessageId(messageId);
+    const originalMessage = activeSession?.messages.find((message) => message.id === messageId);
+    const originalImageDataUrls = originalMessage?.imageDataUrls ?? [];
     setUpdatingMessageId(assistantMessageId ?? messageId);
     if (assistantMessageId) setStreamingMessageId(assistantMessageId);
     setSessions((items) =>
@@ -441,7 +462,7 @@ export function Chat() {
       ),
     );
     try {
-      const updated = await api.editChatMessageStream(messageId, content, [], {
+      const updated = await api.editChatMessageStream(messageId, content, originalImageDataUrls, {
         onStart: (userMessage) => {
           setSessions((items) =>
             items.map((item) =>
@@ -514,15 +535,34 @@ export function Chat() {
 
   const uploadAttachment = async (file: File) => {
     if (!activeSession || !user) return;
-    const targetKnowledgeBaseId = selectedKnowledgeBaseIds[0];
-    if (!targetKnowledgeBaseId) return;
     setUploadingAttachment(true);
     try {
-      const result = await api.uploadSessionAttachment(activeSession.id, file, targetKnowledgeBaseId);
+      const result = await api.uploadSessionAttachment(activeSession.id, file);
       setAttachedDocumentIds((items) => [...items, result.documentId]);
+      setSessions((items) =>
+        items.map((item) =>
+          item.id === activeSession.id
+            ? {
+                ...item,
+                attachedDocumentIds: [...(item.attachedDocumentIds ?? []), result.documentId],
+                attachedDocuments: [
+                  ...(item.attachedDocuments ?? []),
+                  { id: result.documentId, title: result.title, fileName: result.fileName, indexStatus: result.indexStatus },
+                ],
+              }
+            : item,
+        ),
+      );
     } finally {
       setUploadingAttachment(false);
     }
+  };
+
+  const removeAttachment = async (documentId: string) => {
+    if (!activeSession) return;
+    const updated = await api.removeSessionAttachment(activeSession.id, documentId);
+    replaceSession(updated);
+    setAttachedDocumentIds(updated.attachedDocumentIds ?? []);
   };
 
   const addImages = async (files: FileList | null) => {
@@ -618,7 +658,7 @@ export function Chat() {
               <div className="w-8 h-8 rounded bg-blue-100 text-blue-600 border border-blue-200 text-center leading-8 text-xs font-bold">AI</div>
               <div className="bg-white border border-slate-200 rounded-lg p-3 text-sm text-slate-500 flex items-center gap-2">
                 <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
-                {hasKnowledgeContext ? '正在检索知识库并调用 GLM-5.1...' : '正在调用 GLM-5.1...'}
+                {hasKnowledgeContext ? `正在检索上下文并调用 ${currentModel}...` : `正在调用 ${currentModel}...`}
               </div>
             </div>
           )}
@@ -695,7 +735,7 @@ export function Chat() {
               </button>
               <button
                 onClick={() => fileInputRef.current?.click()}
-                disabled={!activeSession || uploadingAttachment || knowledgeBases.length === 0}
+                disabled={!activeSession || uploadingAttachment}
                 className="p-1.5 rounded border border-slate-200 text-slate-500 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-50"
                 title="上传会话文档"
               >
@@ -730,7 +770,22 @@ export function Chat() {
               ))}
             </div>
           )}
-          {attachedDocumentIds.length > 0 && <div className="mt-2 text-[11px] text-slate-500">当前会话附件已索引：{attachedDocumentIds.length} 个。</div>}
+          {attachedDocuments.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+              <span>当前会话附件已索引：{attachedDocuments.length} 个</span>
+              {attachedDocuments.map((document, index) => (
+                <button
+                  key={document.id}
+                  onClick={() => void removeAttachment(document.id)}
+                  className="inline-flex items-center gap-1 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                  title={`移除附件 ${document.fileName || document.title}`}
+                >
+                  <span className="max-w-48 truncate">{document.title || document.fileName || `附件 ${index + 1}`}</span>
+                  <X className="h-3 w-3" />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -993,6 +1048,7 @@ function MessageBubble({
 }) {
   const isUser = message.role === 'user';
   const [thinkingOpen, setThinkingOpen] = useState(false);
+  const [citationsOpen, setCitationsOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draftContent, setDraftContent] = useState(message.content);
   const parsed = splitThinking(message.content, message.reasoning, showThinking);
@@ -1031,6 +1087,24 @@ function MessageBubble({
           </div>
         )}
 
+        {message.attachments && message.attachments.length > 0 && (
+          <div className={cn('mb-3 flex flex-wrap gap-1.5 text-xs', isUser ? 'text-blue-50' : 'text-slate-600')}>
+            {message.attachments.map((attachment) => (
+              <span
+                key={attachment.id}
+                className={cn(
+                  'inline-flex max-w-64 items-center gap-1 rounded border px-2 py-1',
+                  isUser ? 'border-blue-300 bg-blue-500/40' : 'border-slate-200 bg-slate-50',
+                )}
+                title={attachment.fileName || attachment.title}
+              >
+                <Paperclip className="h-3 w-3 shrink-0" />
+                <span className="truncate">{attachment.fileName || attachment.title}</span>
+              </span>
+            ))}
+          </div>
+        )}
+
         {isUser && editing ? (
           <div className="space-y-2">
             <textarea
@@ -1065,19 +1139,28 @@ function MessageBubble({
 
         {message.citations && message.citations.length > 0 && (
           <div className="mt-4 border-t border-slate-100 pt-3">
-            <p className="text-xs font-semibold text-slate-500 mb-2 flex items-center">
+            <button
+              onClick={() => setCitationsOpen((open) => !open)}
+              className="mb-2 flex w-full items-center text-left text-xs font-semibold text-slate-500 hover:text-blue-600"
+            >
+              {citationsOpen ? <ChevronDown className="mr-1 h-3.5 w-3.5" /> : <ChevronRight className="mr-1 h-3.5 w-3.5" />}
               <Search className="w-3.5 h-3.5 mr-1 text-blue-500" />
               检索到 {message.citations.length} 处真实引用
-            </p>
+            </button>
             <div className="space-y-2">
               {message.citations.map((citation) => (
                 <div key={citation.id} className="bg-slate-50 border border-slate-200 rounded p-2">
                   <div className="flex justify-between gap-3">
                     <span className="font-bold text-slate-700 text-xs">{citation.title}</span>
-                    <span className="text-[10px] text-blue-600">{citation.similarity}%</span>
+                    <span
+                      className="shrink-0 text-[10px] text-blue-600"
+                      title="检索匹配度，表示本次问题与该引用片段的相似程度，不代表答案准确率。"
+                    >
+                      匹配度 {citation.similarity}%
+                    </span>
                   </div>
                   <div className="text-[10px] text-slate-400 mt-1">{citation.knowledgeBaseName}</div>
-                  <p className="text-xs text-slate-600 mt-1 leading-5">{citation.excerpt}</p>
+                  {citationsOpen && <p className="text-xs text-slate-600 mt-1 leading-5 whitespace-pre-wrap">{citation.excerpt}</p>}
                 </div>
               ))}
             </div>

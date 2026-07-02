@@ -52,6 +52,7 @@ export function Chat() {
   const [imageDataUrls, setImageDataUrls] = useState<string[]>([]);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+  const [updatingMessageId, setUpdatingMessageId] = useState<string | null>(null);
   const [contextUsage, setContextUsage] = useState<ContextUsageState>({ status: 'idle' });
 
   const ensureFallbackSession = async () => {
@@ -341,22 +342,167 @@ export function Chat() {
     setActiveSessionId(updated.id);
   };
 
+  const nextAssistantMessageId = (messageId: string) => {
+    if (!activeSession) return null;
+    const index = activeSession.messages.findIndex((message) => message.id === messageId);
+    if (index < 0) return null;
+    for (const message of activeSession.messages.slice(index + 1)) {
+      if (message.role === 'assistant') return message.id;
+      if (message.role === 'user') return null;
+    }
+    return null;
+  };
+
   const regenerateMessage = async (message: ChatMessage) => {
-    if (message.role !== 'assistant') return;
-    setGenerating(true);
+    const assistantMessageId = message.role === 'assistant' ? message.id : nextAssistantMessageId(message.id);
+    if (!assistantMessageId) return;
+    setUpdatingMessageId(assistantMessageId);
+    setStreamingMessageId(assistantMessageId);
+    setSessions((items) =>
+      items.map((item) =>
+        item.id === activeSession?.id
+          ? {
+              ...item,
+              messages: item.messages.map((itemMessage) =>
+                itemMessage.id === assistantMessageId ? { ...itemMessage, content: '', reasoning: null, citations: [] } : itemMessage,
+              ),
+            }
+          : item,
+      ),
+    );
     try {
-      replaceSession(await api.regenerateChatMessage(message.id));
+      const updated = await api.regenerateChatMessageStream(assistantMessageId, {
+        onContent: (messageId, delta) => {
+          setSessions((items) =>
+            items.map((item) =>
+              item.id === activeSession?.id
+                ? {
+                    ...item,
+                    messages: item.messages.map((itemMessage) =>
+                      itemMessage.id === messageId ? { ...itemMessage, content: `${itemMessage.content}${delta}` } : itemMessage,
+                    ),
+                  }
+                : item,
+            ),
+          );
+        },
+        onReasoning: (messageId, delta) => {
+          setSessions((items) =>
+            items.map((item) =>
+              item.id === activeSession?.id
+                ? {
+                    ...item,
+                    messages: item.messages.map((itemMessage) =>
+                      itemMessage.id === messageId ? { ...itemMessage, reasoning: `${itemMessage.reasoning ?? ''}${delta}` } : itemMessage,
+                    ),
+                  }
+                : item,
+            ),
+          );
+        },
+      });
+      replaceSession(updated);
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : '重新生成失败';
+      setSessions((items) =>
+        items.map((item) =>
+          item.id === activeSession?.id
+            ? {
+                ...item,
+                messages: item.messages.map((itemMessage) =>
+                  itemMessage.id === assistantMessageId ? { ...itemMessage, content: `重新生成失败：${messageText}` } : itemMessage,
+                ),
+              }
+            : item,
+        ),
+      );
     } finally {
-      setGenerating(false);
+      setStreamingMessageId(null);
+      setUpdatingMessageId(null);
     }
   };
 
   const editMessage = async (messageId: string, content: string) => {
-    setGenerating(true);
+    const assistantMessageId = nextAssistantMessageId(messageId);
+    setUpdatingMessageId(assistantMessageId ?? messageId);
+    if (assistantMessageId) setStreamingMessageId(assistantMessageId);
+    setSessions((items) =>
+      items.map((item) =>
+        item.id === activeSession?.id
+          ? {
+              ...item,
+              messages: item.messages.map((itemMessage) => {
+                if (itemMessage.id === messageId) return { ...itemMessage, content };
+                if (itemMessage.id === assistantMessageId) return { ...itemMessage, content: '', reasoning: null, citations: [] };
+                return itemMessage;
+              }),
+            }
+          : item,
+      ),
+    );
     try {
-      replaceSession(await api.editChatMessage(messageId, content));
+      const updated = await api.editChatMessageStream(messageId, content, [], {
+        onStart: (userMessage) => {
+          setSessions((items) =>
+            items.map((item) =>
+              item.id === activeSession?.id
+                ? {
+                    ...item,
+                    messages: item.messages.map((itemMessage) => (itemMessage.id === userMessage.id ? userMessage : itemMessage)),
+                  }
+                : item,
+            ),
+          );
+        },
+        onContent: (streamMessageId, delta) => {
+          setSessions((items) =>
+            items.map((item) =>
+              item.id === activeSession?.id
+                ? {
+                    ...item,
+                    messages: item.messages.map((itemMessage) =>
+                      itemMessage.id === streamMessageId ? { ...itemMessage, content: `${itemMessage.content}${delta}` } : itemMessage,
+                    ),
+                  }
+                : item,
+            ),
+          );
+        },
+        onReasoning: (streamMessageId, delta) => {
+          setSessions((items) =>
+            items.map((item) =>
+              item.id === activeSession?.id
+                ? {
+                    ...item,
+                    messages: item.messages.map((itemMessage) =>
+                      itemMessage.id === streamMessageId ? { ...itemMessage, reasoning: `${itemMessage.reasoning ?? ''}${delta}` } : itemMessage,
+                    ),
+                  }
+                : item,
+            ),
+          );
+        },
+      });
+      replaceSession(updated);
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : '编辑后重新生成失败';
+      if (assistantMessageId) {
+        setSessions((items) =>
+          items.map((item) =>
+            item.id === activeSession?.id
+              ? {
+                  ...item,
+                  messages: item.messages.map((itemMessage) =>
+                    itemMessage.id === assistantMessageId ? { ...itemMessage, content: `编辑后重新生成失败：${messageText}` } : itemMessage,
+                  ),
+                }
+              : item,
+          ),
+        );
+      }
     } finally {
-      setGenerating(false);
+      setStreamingMessageId(null);
+      setUpdatingMessageId(null);
     }
   };
 
@@ -463,6 +609,8 @@ export function Chat() {
               onEdit={(content) => void editMessage(message.id, content)}
               onRegenerate={() => void regenerateMessage(message)}
               onFeedback={(feedback) => void feedbackMessage(message, feedback)}
+              isUpdating={updatingMessageId === message.id}
+              showThinking={showThinking}
             />
           ))}
           {generating && !streamingMessageId && (
@@ -815,14 +963,15 @@ function formatDuration(ms?: number) {
   return `${seconds}s`;
 }
 
-function splitThinking(content: string, reasoning?: string | null) {
+function splitThinking(content: string, reasoning?: string | null, includeThinking = true) {
   const thinkMatch = content.match(/<think>([\s\S]*?)(?:<\/think>|$)/i);
-  if (!thinkMatch) return { thinking: reasoning ?? '', answer: content };
+  if (!thinkMatch) return { thinking: includeThinking ? (reasoning ?? '') : '', answer: content };
+  const answer = content.replace(/<think>[\s\S]*?(?:<\/think>|$)/i, '').trim();
+  if (!includeThinking) return { thinking: '', answer };
   const thinking = [reasoning, thinkMatch[1]]
     .filter((item): item is string => Boolean(item?.trim()))
     .join('\n\n')
     .trim();
-  const answer = content.replace(/<think>[\s\S]*?(?:<\/think>|$)/i, '').trim();
   return { thinking, answer };
 }
 
@@ -831,18 +980,22 @@ function MessageBubble({
   onEdit,
   onRegenerate,
   onFeedback,
+  isUpdating,
+  showThinking,
 }: {
   message: ChatMessage;
   key?: string;
   onEdit: (content: string) => void;
   onRegenerate: () => void;
   onFeedback: (feedback: 'like' | 'dislike') => void;
+  isUpdating?: boolean;
+  showThinking: boolean;
 }) {
   const isUser = message.role === 'user';
   const [thinkingOpen, setThinkingOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draftContent, setDraftContent] = useState(message.content);
-  const parsed = splitThinking(message.content, message.reasoning);
+  const parsed = splitThinking(message.content, message.reasoning, showThinking);
   const visibleContent = isUser ? message.content : parsed.answer;
   const thinking = isUser ? '' : parsed.thinking;
 
@@ -852,6 +1005,13 @@ function MessageBubble({
 
       <div className={cn('p-3 rounded-lg text-sm max-w-[78%] shadow-sm', isUser ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-slate-800')}>
         {!isUser && message.model && <div className="text-[10px] text-blue-600 font-bold mb-2">{message.model}</div>}
+
+        {!isUser && isUpdating && (
+          <div className="mb-2 flex items-center gap-2 rounded border border-blue-100 bg-blue-50 px-2 py-1.5 text-xs font-medium text-blue-700">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            正在重新生成答案...
+          </div>
+        )}
 
         {!isUser && thinking && (
           <div className="mb-3 border border-slate-200 rounded bg-slate-50">

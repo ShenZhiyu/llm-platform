@@ -64,13 +64,13 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
-def split_thinking_tags(content: str, reasoning: str | None = None) -> tuple[str, str | None]:
+def split_thinking_tags(content: str, reasoning: str | None = None, keep_reasoning: bool = True) -> tuple[str, str | None]:
     start_tag = "<think>"
     end_tag = "</think>"
     lower_content = content.lower()
     start_index = lower_content.find(start_tag)
     if start_index < 0:
-        return content, reasoning
+        return content, reasoning if keep_reasoning else None
 
     body_start = start_index + len(start_tag)
     end_index = lower_content.find(end_tag, body_start)
@@ -81,6 +81,8 @@ def split_thinking_tags(content: str, reasoning: str | None = None) -> tuple[str
         thinking_part = content[body_start:end_index]
         answer_part = content[:start_index] + content[end_index + len(end_tag):]
 
+    if not keep_reasoning:
+        return answer_part.strip(), None
     thinking_parts = [part.strip() for part in [reasoning, thinking_part] if part and part.strip()]
     return answer_part.strip(), "\n\n".join(thinking_parts) or None
 
@@ -260,8 +262,8 @@ def run_llm_for_message(
     )
     elapsed_ms = int((perf_counter() - started_at) * 1000)
     answer = completion.content
-    reasoning = completion.reasoning if session.show_thinking else None
-    answer, reasoning = split_thinking_tags(answer, reasoning if session.show_thinking else None)
+    reasoning = completion.reasoning
+    answer, reasoning = split_thinking_tags(answer, reasoning, keep_reasoning=True)
     tokens_per_second = round(completion.output_tokens / (elapsed_ms / 1000), 2) if elapsed_ms > 0 and completion.output_tokens > 0 else 0
     return (
         answer,
@@ -582,8 +584,8 @@ def send_message(session_id: str, payload: ChatMessageCreate, current_user: User
         elapsed_ms = int((perf_counter() - started_at) * 1000)
         answer = completion.content
         model_id = completion.model
-        reasoning = completion.reasoning if payload.show_thinking else None
-        answer, reasoning = split_thinking_tags(answer, reasoning if payload.show_thinking else None)
+        reasoning = completion.reasoning
+        answer, reasoning = split_thinking_tags(answer, reasoning, keep_reasoning=True)
         input_tokens = completion.input_tokens
         output_tokens = completion.output_tokens
         risk = AuditRisk.NORMAL
@@ -683,6 +685,125 @@ def regenerate_message(assistant_message_id: str, current_user: User = Depends(g
     return to_session_read(session)
 
 
+@router.post("/messages/{assistant_message_id}/regenerate/stream")
+def stream_regenerate_message(assistant_message_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> StreamingResponse:
+    def generate():
+        settings = get_settings()
+        try:
+            session, assistant_message = get_owned_message(db, assistant_message_id, current_user)
+        except HTTPException as exc:
+            yield sse_event({"type": "error", "message": str(exc.detail)})
+            return
+        if assistant_message.role != ChatRole.ASSISTANT:
+            yield sse_event({"type": "error", "message": "Only assistant messages can be regenerated"})
+            return
+        messages = list(session.messages)
+        assistant_index = next(index for index, message in enumerate(messages) if message.id == assistant_message.id)
+        user_message = next((message for message in reversed(messages[:assistant_index]) if message.role == ChatRole.USER), None)
+        if user_message is None:
+            yield sse_event({"type": "error", "message": "No preceding user message found"})
+            return
+
+        rag_results: list[KnowledgeSearchResult] = []
+        rag_error: str | None = None
+        knowledge_base_ids = session_knowledge_base_ids(session)
+        attached_document_ids = session_attached_document_ids(session)
+        if knowledge_base_ids or attached_document_ids:
+            try:
+                rag_results = RAGIndex().search(
+                    db,
+                    user_message.content,
+                    knowledge_base_ids=knowledge_base_ids or None,
+                    document_ids=attached_document_ids or None,
+                    top_k=settings.rag_top_k,
+                )
+            except RAGServiceError as exc:
+                rag_error = str(exc)
+
+        citations = to_citation_dicts(rag_results)
+        context = context_from_results(rag_results)
+        audit_detail = f"流式重新生成回答，真实检索命中 {len(citations)} 条知识库依据。"
+        if not knowledge_base_ids and not attached_document_ids:
+            audit_detail += " 本轮未引用知识库。"
+        if rag_error:
+            audit_detail += f" 检索不可用：{rag_error}"
+
+        yield sse_event({"type": "start", "assistantMessage": parse_message(assistant_message).model_dump(by_alias=True)})
+
+        started_at = perf_counter()
+        first_token_latency_ms = 0
+        answer_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        input_tokens = 0
+        output_tokens = 0
+        model_id = session.model
+        try:
+            llm_messages = build_llm_messages(session, user_message.content, context, session.enable_thinking, session.recent_message_limit, json_list(user_message.images_json))
+            for chunk in get_llm_client().stream_complete(
+                llm_messages,
+                model=session.model,
+                temperature=session.temperature,
+                top_p=session.top_p,
+                max_tokens=session.max_tokens,
+                enable_thinking=session.enable_thinking,
+            ):
+                if chunk.model:
+                    model_id = chunk.model
+                if chunk.input_tokens:
+                    input_tokens = chunk.input_tokens
+                if chunk.output_tokens:
+                    output_tokens = chunk.output_tokens
+                if chunk.content:
+                    if first_token_latency_ms == 0:
+                        first_token_latency_ms = int((perf_counter() - started_at) * 1000)
+                    answer_parts.append(chunk.content)
+                    yield sse_event({"type": "content", "messageId": assistant_message.id, "delta": chunk.content})
+                if chunk.reasoning:
+                    reasoning_parts.append(chunk.reasoning)
+                    if session.show_thinking:
+                        yield sse_event({"type": "reasoning", "messageId": assistant_message.id, "delta": chunk.reasoning})
+        except LLMClientError as exc:
+            write_audit(db, current_user, "重新生成回答失败", session.title, AuditRisk.WARNING, str(exc))
+            db.commit()
+            yield sse_event({"type": "error", "message": "LLM gateway unavailable", "reason": str(exc)})
+            return
+
+        elapsed_ms = int((perf_counter() - started_at) * 1000)
+        answer = "".join(answer_parts).strip()
+        reasoning = "".join(reasoning_parts).strip()
+        answer, parsed_reasoning = split_thinking_tags(answer, reasoning or None, keep_reasoning=True)
+        reasoning = parsed_reasoning or ""
+        if not answer and reasoning:
+            answer = "已生成思考过程，请展开查看。"
+        if not answer:
+            yield sse_event({"type": "error", "message": "LLM gateway returned an empty response"})
+            return
+
+        assistant_message.model = model_id
+        assistant_message.content = answer
+        assistant_message.reasoning = reasoning or None
+        assistant_message.response_time_ms = elapsed_ms
+        assistant_message.first_token_latency_ms = first_token_latency_ms or elapsed_ms
+        assistant_message.input_tokens = input_tokens
+        assistant_message.output_tokens = output_tokens
+        assistant_message.tokens_per_second = round(output_tokens / (elapsed_ms / 1000), 2) if elapsed_ms > 0 and output_tokens > 0 else 0
+        assistant_message.citations_json = json.dumps(citations, ensure_ascii=False)
+        assistant_message.regenerated_at = now_text()
+        session.model = model_id
+        session.updated_at = now_text()
+        write_audit(db, current_user, "重新生成回答", session.title, AuditRisk.NORMAL, audit_detail)
+        db.commit()
+        db.expire_all()
+
+        refreshed = db.scalar(select(ChatSession).options(selectinload(ChatSession.messages)).where(ChatSession.id == session.id).where(ChatSession.user_id == current_user.id))
+        if refreshed is None:
+            yield sse_event({"type": "error", "message": "Chat session not found"})
+            return
+        yield sse_event({"type": "done", "session": to_session_read(refreshed).model_dump(by_alias=True)})
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
 @router.patch("/messages/{user_message_id}", response_model=ChatSessionRead)
 def edit_user_message(
     user_message_id: str,
@@ -711,6 +832,142 @@ def edit_user_message(
     db.commit()
     db.refresh(session)
     return to_session_read(session)
+
+
+@router.post("/messages/{user_message_id}/edit/stream")
+def stream_edit_user_message(
+    user_message_id: str,
+    payload: ChatMessageEdit,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    def generate():
+        settings = get_settings()
+        try:
+            session, user_message = get_owned_message(db, user_message_id, current_user)
+        except HTTPException as exc:
+            yield sse_event({"type": "error", "message": str(exc.detail)})
+            return
+        if user_message.role != ChatRole.USER:
+            yield sse_event({"type": "error", "message": "Only user messages can be edited"})
+            return
+
+        user_message.content = payload.content
+        user_message.images_json = json.dumps(payload.image_data_urls, ensure_ascii=False)
+        user_message.edited_at = now_text()
+        assistant_message = next_assistant_message(session, user_message)
+        if assistant_message is None:
+            session.updated_at = now_text()
+            write_audit(db, current_user, "编辑用户消息", session.title, AuditRisk.NORMAL, "用户消息已更新，未找到需要重算的回答。")
+            db.commit()
+            db.refresh(session)
+            yield sse_event({"type": "done", "session": to_session_read(session).model_dump(by_alias=True)})
+            return
+
+        rag_results: list[KnowledgeSearchResult] = []
+        rag_error: str | None = None
+        knowledge_base_ids = session_knowledge_base_ids(session)
+        attached_document_ids = session_attached_document_ids(session)
+        if knowledge_base_ids or attached_document_ids:
+            try:
+                rag_results = RAGIndex().search(
+                    db,
+                    user_message.content,
+                    knowledge_base_ids=knowledge_base_ids or None,
+                    document_ids=attached_document_ids or None,
+                    top_k=settings.rag_top_k,
+                )
+            except RAGServiceError as exc:
+                rag_error = str(exc)
+
+        citations = to_citation_dicts(rag_results)
+        context = context_from_results(rag_results)
+        audit_detail = f"编辑用户消息后流式重算回答，真实检索命中 {len(citations)} 条知识库依据。"
+        if not knowledge_base_ids and not attached_document_ids:
+            audit_detail += " 本轮未引用知识库。"
+        if rag_error:
+            audit_detail += f" 检索不可用：{rag_error}"
+
+        yield sse_event(
+            {
+                "type": "start",
+                "userMessage": parse_message(user_message).model_dump(by_alias=True),
+                "assistantMessage": parse_message(assistant_message).model_dump(by_alias=True),
+            }
+        )
+
+        started_at = perf_counter()
+        first_token_latency_ms = 0
+        answer_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        input_tokens = 0
+        output_tokens = 0
+        model_id = session.model
+        try:
+            llm_messages = build_llm_messages(session, user_message.content, context, session.enable_thinking, session.recent_message_limit, json_list(user_message.images_json))
+            for chunk in get_llm_client().stream_complete(
+                llm_messages,
+                model=session.model,
+                temperature=session.temperature,
+                top_p=session.top_p,
+                max_tokens=session.max_tokens,
+                enable_thinking=session.enable_thinking,
+            ):
+                if chunk.model:
+                    model_id = chunk.model
+                if chunk.input_tokens:
+                    input_tokens = chunk.input_tokens
+                if chunk.output_tokens:
+                    output_tokens = chunk.output_tokens
+                if chunk.content:
+                    if first_token_latency_ms == 0:
+                        first_token_latency_ms = int((perf_counter() - started_at) * 1000)
+                    answer_parts.append(chunk.content)
+                    yield sse_event({"type": "content", "messageId": assistant_message.id, "delta": chunk.content})
+                if chunk.reasoning:
+                    reasoning_parts.append(chunk.reasoning)
+                    if session.show_thinking:
+                        yield sse_event({"type": "reasoning", "messageId": assistant_message.id, "delta": chunk.reasoning})
+        except LLMClientError as exc:
+            write_audit(db, current_user, "编辑消息重算失败", session.title, AuditRisk.WARNING, str(exc))
+            db.commit()
+            yield sse_event({"type": "error", "message": "LLM gateway unavailable", "reason": str(exc)})
+            return
+
+        elapsed_ms = int((perf_counter() - started_at) * 1000)
+        answer = "".join(answer_parts).strip()
+        reasoning = "".join(reasoning_parts).strip()
+        answer, parsed_reasoning = split_thinking_tags(answer, reasoning or None, keep_reasoning=True)
+        reasoning = parsed_reasoning or ""
+        if not answer and reasoning:
+            answer = "已生成思考过程，请展开查看。"
+        if not answer:
+            yield sse_event({"type": "error", "message": "LLM gateway returned an empty response"})
+            return
+
+        assistant_message.model = model_id
+        assistant_message.content = answer
+        assistant_message.reasoning = reasoning or None
+        assistant_message.response_time_ms = elapsed_ms
+        assistant_message.first_token_latency_ms = first_token_latency_ms or elapsed_ms
+        assistant_message.input_tokens = input_tokens
+        assistant_message.output_tokens = output_tokens
+        assistant_message.tokens_per_second = round(output_tokens / (elapsed_ms / 1000), 2) if elapsed_ms > 0 and output_tokens > 0 else 0
+        assistant_message.citations_json = json.dumps(citations, ensure_ascii=False)
+        assistant_message.regenerated_at = now_text()
+        session.model = model_id
+        session.updated_at = now_text()
+        write_audit(db, current_user, "编辑用户消息", session.title, AuditRisk.NORMAL, audit_detail)
+        db.commit()
+        db.expire_all()
+
+        refreshed = db.scalar(select(ChatSession).options(selectinload(ChatSession.messages)).where(ChatSession.id == session.id).where(ChatSession.user_id == current_user.id))
+        if refreshed is None:
+            yield sse_event({"type": "error", "message": "Chat session not found"})
+            return
+        yield sse_event({"type": "done", "session": to_session_read(refreshed).model_dump(by_alias=True)})
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @router.post("/messages/{assistant_message_id}/feedback", response_model=ChatSessionRead)
@@ -864,9 +1121,10 @@ def stream_message(session_id: str, payload: ChatMessageCreate, current_user: Us
                         first_token_latency_ms = int((perf_counter() - started_at) * 1000)
                     answer_parts.append(chunk.content)
                     yield sse_event({"type": "content", "messageId": assistant_message.id, "delta": chunk.content})
-                if session.show_thinking and chunk.reasoning:
+                if chunk.reasoning:
                     reasoning_parts.append(chunk.reasoning)
-                    yield sse_event({"type": "reasoning", "messageId": assistant_message.id, "delta": chunk.reasoning})
+                    if session.show_thinking:
+                        yield sse_event({"type": "reasoning", "messageId": assistant_message.id, "delta": chunk.reasoning})
         except LLMClientError as exc:
             write_audit(db, current_user, "智能问答失败", f"会话 {session.title}", AuditRisk.WARNING, str(exc))
             db.commit()
@@ -886,8 +1144,8 @@ def stream_message(session_id: str, payload: ChatMessageCreate, current_user: Us
 
         elapsed_ms = int((perf_counter() - started_at) * 1000)
         answer = "".join(answer_parts).strip()
-        reasoning = "".join(reasoning_parts).strip() if session.show_thinking else ""
-        answer, parsed_reasoning = split_thinking_tags(answer, reasoning if session.show_thinking else None)
+        reasoning = "".join(reasoning_parts).strip()
+        answer, parsed_reasoning = split_thinking_tags(answer, reasoning or None, keep_reasoning=True)
         reasoning = parsed_reasoning or ""
         if not answer and reasoning:
             answer = "已生成思考过程，请展开查看。"

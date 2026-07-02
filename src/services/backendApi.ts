@@ -497,12 +497,119 @@ export const backendApi = {
     return mapSession(session);
   },
 
+  async regenerateChatMessageStream(messageId: string, handlers: ChatStreamHandlers) {
+    const token = getToken();
+    const response = await fetch(`${API_BASE_URL}/chat/messages/${messageId}/regenerate/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({}),
+    });
+    if (!response.ok || !response.body) throw new Error(`Backend stream request failed: ${response.status}`);
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalSession: ChatSession | null = null;
+
+    const handleEvent = (rawEvent: string) => {
+      const dataLine = rawEvent
+        .split('\n')
+        .map((line) => line.trim())
+        .find((line) => line.startsWith('data:'));
+      if (!dataLine) return;
+      const payload = JSON.parse(dataLine.slice(5).trim()) as {
+        type: string;
+        message?: string;
+        reason?: string;
+        messageId?: string;
+        delta?: string;
+        assistantMessage?: BackendMessage;
+        session?: BackendSession;
+      };
+      if (payload.type === 'start' && payload.assistantMessage) handlers.onStart?.(mapMessage(payload.assistantMessage), mapMessage(payload.assistantMessage));
+      if (payload.type === 'content' && payload.messageId && payload.delta) handlers.onContent?.(payload.messageId, payload.delta);
+      if (payload.type === 'reasoning' && payload.messageId && payload.delta) handlers.onReasoning?.(payload.messageId, payload.delta);
+      if (payload.type === 'done' && payload.session) finalSession = mapSession(payload.session);
+      if (payload.type === 'error') throw new Error(payload.message ?? payload.reason ?? 'Backend stream failed');
+    };
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split('\n\n');
+      buffer = events.pop() ?? '';
+      events.forEach(handleEvent);
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) handleEvent(buffer);
+    if (!finalSession) throw new Error('Backend stream ended without final session');
+    return finalSession;
+  },
+
   async editChatMessage(messageId: string, content: string, imageDataUrls: string[] = []) {
     const session = await request<BackendSession>(`/chat/messages/${messageId}`, {
       method: 'PATCH',
       body: JSON.stringify({ content, imageDataUrls }),
     });
     return mapSession(session);
+  },
+
+  async editChatMessageStream(messageId: string, content: string, imageDataUrls: string[] = [], handlers: ChatStreamHandlers) {
+    const token = getToken();
+    const response = await fetch(`${API_BASE_URL}/chat/messages/${messageId}/edit/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ content, imageDataUrls }),
+    });
+    if (!response.ok || !response.body) throw new Error(`Backend stream request failed: ${response.status}`);
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalSession: ChatSession | null = null;
+
+    const handleEvent = (rawEvent: string) => {
+      const dataLine = rawEvent
+        .split('\n')
+        .map((line) => line.trim())
+        .find((line) => line.startsWith('data:'));
+      if (!dataLine) return;
+      const payload = JSON.parse(dataLine.slice(5).trim()) as {
+        type: string;
+        message?: string;
+        reason?: string;
+        messageId?: string;
+        delta?: string;
+        userMessage?: BackendMessage;
+        assistantMessage?: BackendMessage;
+        session?: BackendSession;
+      };
+      if (payload.type === 'start' && payload.userMessage && payload.assistantMessage) handlers.onStart?.(mapMessage(payload.userMessage), mapMessage(payload.assistantMessage));
+      if (payload.type === 'content' && payload.messageId && payload.delta) handlers.onContent?.(payload.messageId, payload.delta);
+      if (payload.type === 'reasoning' && payload.messageId && payload.delta) handlers.onReasoning?.(payload.messageId, payload.delta);
+      if (payload.type === 'done' && payload.session) finalSession = mapSession(payload.session);
+      if (payload.type === 'error') throw new Error(payload.message ?? payload.reason ?? 'Backend stream failed');
+    };
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split('\n\n');
+      buffer = events.pop() ?? '';
+      events.forEach(handleEvent);
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) handleEvent(buffer);
+    if (!finalSession) throw new Error('Backend stream ended without final session');
+    return finalSession;
   },
 
   async feedbackChatMessage(messageId: string, feedback: 'like' | 'dislike' | 'clear', reason?: string) {

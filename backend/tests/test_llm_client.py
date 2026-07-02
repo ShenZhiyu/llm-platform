@@ -7,7 +7,7 @@ from app.services.llm_client import LLMClient, LLMClientError
 def make_client(handler):
     transport = httpx.MockTransport(handler)
     http_client = httpx.Client(transport=transport)
-    return LLMClient(base_url="http://llm.local/v1", api_key="dummy", model_id="glm-5.1", timeout_seconds=1, client=http_client)
+    return LLMClient(base_url="http://llm.local/v1", api_key="dummy", model_id="Qwen3-30B-A3B-w8a8", timeout_seconds=1, client=http_client)
 
 
 def test_llm_client_reads_message_content():
@@ -18,7 +18,7 @@ def test_llm_client_reads_message_content():
     completion = make_client(handler).complete([{"role": "user", "content": "hello"}])
 
     assert completion.content == "model answer"
-    assert completion.model == "glm-5.1"
+    assert completion.model == "Qwen3-30B-A3B-w8a8"
 
 
 def test_llm_client_uses_reasoning_when_content_is_null():

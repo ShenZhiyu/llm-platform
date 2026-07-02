@@ -126,7 +126,7 @@ export const chatSessions: ChatSession[] = [
   {
     id: 'chat-001',
     title: '声速剖面对探测距离的影响分析',
-    model: 'GLM 5.1',
+    model: 'Qwen3-30B-A3B-w8a8',
     updatedAt: '2026-06-29 14:30',
     messages: [
       {
@@ -138,7 +138,7 @@ export const chatSessions: ChatSession[] = [
       {
         id: 'msg-002',
         role: 'assistant',
-        model: 'GLM 5.1',
+        model: 'Qwen3-30B-A3B-w8a8',
         content:
           '声速剖面对声呐探测距离具有决定性影响。海水温度、盐度和压力会随深度变化，导致声线折射。表面声道会延长近海面传播距离，深海声道可形成远距离低损耗传播，汇聚区会在远距离形成能量增强，而强跃层可能制造影区，使实际探测距离明显低于标称值。',
         createdAt: '2026-06-29 14:29',
@@ -193,7 +193,7 @@ export const auditLogs: AuditLog[] = [
 ];
 
 export const modelConfigs: ModelConfig[] = [
-  { id: 'm-001', name: 'GLM 5.1', type: '通用大语言模型', status: '正常', isDefault: true, endpoint: '10.12.1.200:8080/v1' },
+  { id: 'm-001', name: 'Qwen3-30B-A3B-w8a8', type: '通用大语言模型', status: '正常', isDefault: true, endpoint: '192.168.10.101:8000/v1' },
   { id: 'm-002', name: 'Qwen 3.5', type: '通用大语言模型', status: '正常', isDefault: false, endpoint: '10.12.1.201:8080/v1' },
   { id: 'm-003', name: 'DeepSeek V4', type: '深度推理模型', status: '正常', isDefault: false, endpoint: '10.12.2.100:8000/v1' },
   { id: 'm-004', name: 'DeepSeek R1', type: '备用推理模型', status: '已下线', isDefault: false, endpoint: '-' },

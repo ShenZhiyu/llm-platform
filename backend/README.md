@@ -49,7 +49,7 @@ uvicorn app.main:app --reload --port 8000
 ```text
 LLM_API_BASE_URL="http://192.168.10.101:8000/v1"
 LLM_API_KEY="dummy"
-LLM_MODEL_ID="glm-5.1"
+LLM_MODEL_ID="Qwen3-30B-A3B-w8a8"
 LLM_TIMEOUT_SECONDS=60
 LLM_USE_MOCK_FALLBACK=true
 ```

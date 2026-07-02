@@ -12,7 +12,7 @@ from app.services.llm_client import LLMCompletion
 class FakeLLMClient:
     def complete(self, messages, model=None, temperature=0.2, top_p=0.9, max_tokens=2048, enable_thinking=True):
         assert messages[-1]["role"] == "user"
-        return LLMCompletion(content="REAL_MODEL_REPLY", model="glm-5.1", raw={}, reasoning="FAKE_REASONING")
+        return LLMCompletion(content="REAL_MODEL_REPLY", model="Qwen3-30B-A3B-w8a8", raw={}, reasoning="FAKE_REASONING")
 
 
 def auth_headers(client: TestClient, username: str = "u-1001") -> dict[str, str]:
@@ -105,20 +105,20 @@ def test_document_approval_and_chat_flow(monkeypatch):
         decision = client.post(f"/api/v1/approvals/{pending[0]['id']}/decision", json={"approved": True}, headers=kb_admin_headers)
         assert decision.status_code == 200
 
-        session = client.post("/api/v1/chat/sessions", json={"model": "GLM 5.1", "title": "api-test-session"}, headers=headers)
+        session = client.post("/api/v1/chat/sessions", json={"model": "Qwen3-30B-A3B-w8a8", "title": "api-test-session"}, headers=headers)
         assert session.status_code == 201
         session_id = session.json()["id"]
 
         message = client.post(
             f"/api/v1/chat/sessions/{session_id}/messages",
-            json={"content": "Explain sound speed profile impact.", "model": "GLM 5.1"},
+            json={"content": "Explain sound speed profile impact.", "model": "Qwen3-30B-A3B-w8a8"},
             headers=headers,
         )
         assert message.status_code == 200
         data = message.json()
         assert len(data["messages"]) == 2
         assert data["messages"][1]["content"] == "REAL_MODEL_REPLY"
-        assert data["messages"][1]["model"] == "glm-5.1"
+        assert data["messages"][1]["model"] == "Qwen3-30B-A3B-w8a8"
         assert data["messages"][1]["reasoning"] == "FAKE_REASONING"
         assert data["messages"][1]["citations"] == []
 
@@ -128,13 +128,13 @@ def test_chat_session_archive_restore_and_hard_delete(monkeypatch):
 
     with TestClient(app) as client:
         headers = auth_headers(client)
-        session = client.post("/api/v1/chat/sessions", json={"model": "GLM 5.1", "title": "archive-test-session"}, headers=headers)
+        session = client.post("/api/v1/chat/sessions", json={"model": "Qwen3-30B-A3B-w8a8", "title": "archive-test-session"}, headers=headers)
         assert session.status_code == 201
         session_id = session.json()["id"]
 
         message = client.post(
             f"/api/v1/chat/sessions/{session_id}/messages",
-            json={"content": "Archive this session later.", "model": "GLM 5.1"},
+            json={"content": "Archive this session later.", "model": "Qwen3-30B-A3B-w8a8"},
             headers=headers,
         )
         assert message.status_code == 200
@@ -228,7 +228,7 @@ def test_missing_knowledge_references_are_rejected():
         headers = auth_headers(client)
         missing_kb = client.post(
             "/api/v1/chat/sessions/chat-001/messages",
-            json={"content": "test", "model": "glm-5.1", "knowledgeBaseIds": ["kb-not-exists"]},
+            json={"content": "test", "model": "Qwen3-30B-A3B-w8a8", "knowledgeBaseIds": ["kb-not-exists"]},
             headers=headers,
         )
         assert missing_kb.status_code == 404

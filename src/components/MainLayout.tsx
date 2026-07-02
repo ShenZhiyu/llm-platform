@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { NavLink, Navigate, Outlet, useLocation } from 'react-router-dom';
 import {
   Bell,
@@ -24,8 +24,7 @@ import {
 } from 'lucide-react';
 import { useAppContext } from '../AppContext';
 import { cn } from '../lib/utils';
-import { backendApi } from '../services/backendApi';
-import type { ModelConfig, Role } from '../types/domain';
+import type { Role } from '../types/domain';
 
 const BASIC_PATHS = ['/portal', '/workspace', '/messages'];
 
@@ -100,10 +99,8 @@ function isNavItemActive(pathname: string, itemPath: string) {
 }
 
 export function MainLayout() {
-  const { isAuthenticated, authLoading, user, userRole, currentModel, setCurrentModel, logout } = useAppContext();
+  const { isAuthenticated, authLoading, user, userRole, currentModel, setCurrentModel, models: modelOptions, logout } = useAppContext();
   const location = useLocation();
-  const [modelOptions, setModelOptions] = useState<ModelConfig[]>([]);
-
 
   const allowedPaths = getAllowedPaths(userRole);
   const allItems = navGroups.flatMap((group) => group.items.map((item) => ({ ...item, group: group.groupLabel })));
@@ -112,28 +109,6 @@ export function MainLayout() {
     () => modelOptions.filter((model) => model.status === '正常' || model.status.toLowerCase() === 'normal'),
     [modelOptions],
   );
-
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    let active = true;
-    void backendApi
-      .listModels()
-      .then((items) => {
-        if (!active) return;
-        setModelOptions(items);
-        const normalModels = items.filter((model) => model.status === '正常' || model.status.toLowerCase() === 'normal');
-        const defaultModel = normalModels.find((model) => model.isDefault) ?? normalModels[0];
-        if (defaultModel && !normalModels.some((model) => model.name === currentModel)) {
-          setCurrentModel(defaultModel.name);
-        }
-      })
-      .catch(() => {
-        if (active) setModelOptions([]);
-      });
-    return () => {
-      active = false;
-    };
-  }, [currentModel, isAuthenticated, setCurrentModel]);
 
   if (authLoading) return <div className="h-screen grid place-items-center text-sm text-slate-500">正在恢复登录状态...</div>;
   if (!isAuthenticated) return <Navigate to="/login" replace />;

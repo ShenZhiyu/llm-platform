@@ -1,14 +1,8 @@
-import { useEffect, useState } from 'react';
 import { Cpu, Server } from 'lucide-react';
-import { backendApi } from '../services/backendApi';
-import type { ModelConfig } from '../types/domain';
+import { useAppContext } from '../AppContext';
 
 export function AdminModels() {
-  const [models, setModels] = useState<ModelConfig[]>([]);
-
-  useEffect(() => {
-    void backendApi.listModels().then(setModels);
-  }, []);
+  const { models } = useAppContext();
 
   return (
     <div className="p-6 max-w-7xl mx-auto h-full flex flex-col">

@@ -198,8 +198,6 @@ class LLMClient:
         settings = get_settings()
         if model == settings.vl_llm_model_id:
             return settings.vl_llm_model_id, settings.vl_llm_api_base_url.rstrip("/"), settings.vl_llm_api_key
-        if model in {None, "", "GLM 5.1", "glm-5.1", settings.llm_model_id}:
-            return self.model_id, self.base_url, self.api_key
         return self.model_id, self.base_url, self.api_key
 
 

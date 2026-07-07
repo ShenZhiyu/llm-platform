@@ -239,11 +239,44 @@ class LLMTaskRead(ApiSchema):
     title: str
     input_text: str
     output_text: str
+    reasoning: str | None = None
     model: str
     status: str
     input_tokens: int
     output_tokens: int
     created_at: str
+
+
+class CodeChange(ApiSchema):
+    file_path: str
+    operation: str = "replace"
+    find: str
+    replace: str
+    description: str = ""
+
+
+class CodeEditRequest(ApiSchema):
+    instruction: str = Field(min_length=1)
+    file_path: str = Field(min_length=1)
+    language: str = "plaintext"
+    content: str = ""
+    selected_text: str = ""
+    user_id: str = "u-1001"
+    model: str = "Qwen3-30B-A3B-w8a8"
+    temperature: float = Field(default=0.1, ge=0, le=2)
+    top_p: float = Field(default=0.9, ge=0, le=1)
+    max_tokens: int = Field(default=4096, ge=1, le=8192)
+
+
+class CodeEditResponse(ApiSchema):
+    id: str
+    answer: str
+    reasoning: str | None = None
+    changes: list[CodeChange] = []
+    raw_output: str
+    model: str
+    input_tokens: int
+    output_tokens: int
 
 
 class WritingTemplateField(ApiSchema):

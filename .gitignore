@@ -21,7 +21,9 @@ backend/**/__pycache__/
 tmp/
 /storage/
 backend/storage/llm_platform.db
+backend/storage/llm.db
 backend/storage/uploads/
+backend/storage/writing/
 !backend/storage/
 !backend/storage/seed_documents/
 !backend/storage/seed_documents/**

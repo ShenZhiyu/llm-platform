@@ -174,6 +174,7 @@ export type LLMTask = {
   title: string;
   inputText: string;
   outputText: string;
+  reasoning?: string | null;
   model: string;
   status: string;
   inputTokens: number;

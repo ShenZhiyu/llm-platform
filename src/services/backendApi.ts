@@ -506,8 +506,36 @@ export const backendApi = {
     return request<LLMTask[]>(`/llm-tasks${taskType ? `?task_type=${encodeURIComponent(taskType)}` : ''}`);
   },
 
-  async createLLMTask(payload: { taskType: string; title: string; inputText: string; userId: string; model?: string }) {
+  async createLLMTask(payload: { taskType: string; title: string; inputText: string; userId: string; model?: string; maxTokens?: number }) {
     return request<LLMTask>('/llm-tasks', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  async createCodeEdit(payload: {
+    instruction: string;
+    filePath: string;
+    language: string;
+    content: string;
+    selectedText?: string;
+    userId: string;
+    model?: string;
+    maxTokens?: number;
+  }) {
+    return request<{
+      id: string;
+      answer: string;
+      reasoning?: string | null;
+      changes: {
+        filePath: string;
+        operation: string;
+        find: string;
+        replace: string;
+        description: string;
+      }[];
+      rawOutput: string;
+      model: string;
+      inputTokens: number;
+      outputTokens: number;
+    }>('/llm-tasks/code-edit', { method: 'POST', body: JSON.stringify(payload) });
   },
 
   async listWritingTemplates() {

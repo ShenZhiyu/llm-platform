@@ -332,3 +332,98 @@ class ChatMessage(Base):
     regenerated_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
     session: Mapped[ChatSession] = relationship(back_populates="messages")
+
+
+class WritingTemplate(Base):
+    __tablename__ = "writing_templates"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False)
+    category: Mapped[str] = mapped_column(String(80), default="通用模板")
+    description: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(40), default="active")
+    owner_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    current_version: Mapped[int] = mapped_column(Integer, default=1)
+    original_file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    original_file_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_size: Mapped[int] = mapped_column(Integer, default=0)
+    content_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    fields_json: Mapped[str] = mapped_column(Text, default="[]")
+    format_config_json: Mapped[str] = mapped_column(Text, default="{}")
+    preview_text: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    updated_at: Mapped[str] = mapped_column(String(40), nullable=False)
+
+    versions: Mapped[list["WritingTemplateVersion"]] = relationship(back_populates="template", cascade="all, delete-orphan")
+    documents: Mapped[list["WritingDocument"]] = relationship(back_populates="template")
+
+
+class WritingTemplateVersion(Base):
+    __tablename__ = "writing_template_versions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    template_id: Mapped[str] = mapped_column(ForeignKey("writing_templates.id"), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    file_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    fields_json: Mapped[str] = mapped_column(Text, default="[]")
+    format_config_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+
+    template: Mapped[WritingTemplate] = relationship(back_populates="versions")
+
+
+class WritingDocument(Base):
+    __tablename__ = "writing_documents"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    template_id: Mapped[str] = mapped_column(ForeignKey("writing_templates.id"), nullable=False)
+    owner_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    title: Mapped[str] = mapped_column(String(220), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="draft")
+    content_json: Mapped[str] = mapped_column(Text, default="{}")
+    format_config_json: Mapped[str] = mapped_column(Text, default="{}")
+    current_file_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    current_file_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    updated_at: Mapped[str] = mapped_column(String(40), nullable=False)
+
+    template: Mapped[WritingTemplate] = relationship(back_populates="documents")
+    versions: Mapped[list["WritingDocumentVersion"]] = relationship(back_populates="document", cascade="all, delete-orphan")
+    ai_operations: Mapped[list["WritingAIOperation"]] = relationship(back_populates="document", cascade="all, delete-orphan")
+
+
+class WritingDocumentVersion(Base):
+    __tablename__ = "writing_document_versions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    document_id: Mapped[str] = mapped_column(ForeignKey("writing_documents.id"), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    title: Mapped[str] = mapped_column(String(220), nullable=False)
+    content_json: Mapped[str] = mapped_column(Text, default="{}")
+    format_config_json: Mapped[str] = mapped_column(Text, default="{}")
+    docx_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+
+    document: Mapped[WritingDocument] = relationship(back_populates="versions")
+
+
+class WritingAIOperation(Base):
+    __tablename__ = "writing_ai_operations"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    document_id: Mapped[str] = mapped_column(ForeignKey("writing_documents.id"), nullable=False)
+    operation_type: Mapped[str] = mapped_column(String(60), nullable=False)
+    instruction: Mapped[str] = mapped_column(Text, default="")
+    input_text: Mapped[str] = mapped_column(Text, default="")
+    output_text: Mapped[str] = mapped_column(Text, default="")
+    model: Mapped[str] = mapped_column(String(100), default="")
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+
+    document: Mapped[WritingDocument] = relationship(back_populates="ai_operations")

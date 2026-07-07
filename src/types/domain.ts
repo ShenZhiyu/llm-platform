@@ -181,6 +181,78 @@ export type LLMTask = {
   createdAt: string;
 };
 
+export type WritingTemplateField = {
+  key: string;
+  label: string;
+  placeholder: string;
+  type?: 'title' | 'body' | 'section' | 'field' | string;
+  editable: boolean;
+  formatEditable: boolean;
+  defaultValue?: string;
+  removable?: boolean;
+  addable?: boolean;
+  order?: number;
+};
+
+export type WritingFormatConfig = {
+  titleFont?: string;
+  bodyFont?: string;
+  titleFontSize?: string;
+  bodyFontSize?: string;
+  fontSize?: string;
+  lineSpacing?: string;
+  allowUserFormat?: boolean;
+};
+
+export type WritingSection = {
+  id: string;
+  title: string;
+  content: string;
+  editable?: boolean;
+  formatEditable?: boolean;
+  removable?: boolean;
+  order?: number;
+};
+
+export type WritingTemplate = {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  status: string;
+  ownerId?: string | null;
+  currentVersion: number;
+  originalFileName: string;
+  fileSize: number;
+  contentHash?: string | null;
+  fields: WritingTemplateField[];
+  formatConfig: WritingFormatConfig;
+  previewText: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type WritingDocument = {
+  id: string;
+  templateId: string;
+  ownerId?: string | null;
+  title: string;
+  status: string;
+  content: {
+    title?: string;
+    body?: string;
+    sections?: WritingSection[];
+    [key: string]: unknown;
+  };
+  formatConfig: WritingFormatConfig;
+  currentFilePath?: string | null;
+  currentFileHash?: string | null;
+  downloadUrl?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  template?: WritingTemplate | null;
+};
+
 export type OpsStatus = {
   database: string;
   llmGateway: string;

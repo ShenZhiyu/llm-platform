@@ -14,9 +14,14 @@ import type {
   OpsStatus,
   ReportSummary,
   User,
+  WritingDocument,
+  WritingFormatConfig,
+  WritingTemplate,
+  WritingTemplateField,
 } from '../types/domain';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:18080/api/v1';
+const API_ORIGIN = API_BASE_URL.replace(/\/api\/v1\/?$/, '');
 const TOKEN_KEY = 'llm-platform:token';
 
 type BackendCitation = {
@@ -503,6 +508,71 @@ export const backendApi = {
 
   async createLLMTask(payload: { taskType: string; title: string; inputText: string; userId: string; model?: string }) {
     return request<LLMTask>('/llm-tasks', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  async listWritingTemplates() {
+    return request<WritingTemplate[]>('/writing/templates');
+  },
+
+  async uploadWritingTemplate(file: File, payload: { name: string; category: string; description?: string; userId: string }) {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('name', payload.name);
+    form.append('category', payload.category);
+    form.append('description', payload.description ?? '');
+    form.append('userId', payload.userId);
+    return uploadForm<WritingTemplate>('/writing/templates/upload', form);
+  },
+
+  async updateWritingTemplate(
+    templateId: string,
+    payload: {
+      name?: string;
+      category?: string;
+      description?: string;
+      fields?: WritingTemplateField[];
+      formatConfig?: WritingFormatConfig;
+      status?: string;
+    },
+  ) {
+    return request<WritingTemplate>(`/writing/templates/${templateId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+  },
+
+  async listWritingDocuments(userId?: string) {
+    return request<WritingDocument[]>(`/writing/documents${userId ? `?user_id=${encodeURIComponent(userId)}` : ''}`);
+  },
+
+  async createWritingDocument(payload: { templateId: string; userId: string; title: string; content?: Record<string, unknown>; formatConfig?: WritingFormatConfig }) {
+    return request<WritingDocument>('/writing/documents', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  async updateWritingDocument(
+    documentId: string,
+    payload: { title?: string; content?: Record<string, unknown>; formatConfig?: WritingFormatConfig; status?: string },
+  ) {
+    return request<WritingDocument>(`/writing/documents/${documentId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+  },
+
+  async generateWritingDocument(
+    documentId: string,
+    payload: { action: string; instruction: string; content: Record<string, unknown>; userId: string; model?: string },
+  ) {
+    return request<{
+      document: WritingDocument;
+      outputText: string;
+      proofreadResults?: { id: string; type: string; original: string; suggestion: string; reason: string }[];
+    }>(`/writing/documents/${documentId}/generate`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async exportWritingDocument(documentId: string, userId: string) {
+    return request<WritingDocument>(`/writing/documents/${documentId}/export`, { method: 'POST', body: JSON.stringify({ userId }) });
+  },
+
+  writingDownloadUrl(downloadUrl: string) {
+    return downloadUrl.startsWith('http') ? downloadUrl : `${API_ORIGIN}${downloadUrl}`;
   },
 
   async regenerateChatMessage(messageId: string) {

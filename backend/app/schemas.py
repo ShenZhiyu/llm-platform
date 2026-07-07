@@ -246,6 +246,108 @@ class LLMTaskRead(ApiSchema):
     created_at: str
 
 
+class WritingTemplateField(ApiSchema):
+    key: str
+    label: str
+    placeholder: str
+    type: str = "field"
+    editable: bool = True
+    format_editable: bool = False
+    default_value: str = ""
+    removable: bool = False
+    addable: bool = False
+    order: int = 0
+
+
+class WritingFormatConfig(ApiSchema):
+    title_font: str = "黑体"
+    body_font: str = "仿宋"
+    title_font_size: str = "二号"
+    body_font_size: str = "小四"
+    font_size: str = "小四"
+    line_spacing: str = "1.5"
+    allow_user_format: bool = False
+
+
+class WritingTemplateRead(ApiSchema):
+    id: str
+    name: str
+    category: str
+    description: str
+    status: str
+    owner_id: str | None = None
+    current_version: int
+    original_file_name: str
+    file_size: int
+    content_hash: str | None = None
+    fields: list[WritingTemplateField] = []
+    format_config: dict[str, Any] = {}
+    preview_text: str = ""
+    created_at: str
+    updated_at: str
+
+
+class WritingTemplateUpdate(ApiSchema):
+    name: str | None = Field(default=None, max_length=180)
+    category: str | None = Field(default=None, max_length=80)
+    description: str | None = None
+    fields: list[WritingTemplateField] | None = None
+    format_config: dict[str, Any] | None = None
+    status: str | None = Field(default=None, max_length=40)
+
+
+class WritingDocumentCreate(ApiSchema):
+    template_id: str
+    user_id: str = "u-1001"
+    title: str = "未命名文档"
+    content: dict[str, Any] = {}
+    format_config: dict[str, Any] = {}
+
+
+class WritingDocumentUpdate(ApiSchema):
+    title: str | None = Field(default=None, max_length=220)
+    content: dict[str, Any] | None = None
+    format_config: dict[str, Any] | None = None
+    status: str | None = Field(default=None, max_length=40)
+
+
+class WritingDocumentRead(ApiSchema):
+    id: str
+    template_id: str
+    owner_id: str | None = None
+    title: str
+    status: str
+    content: dict[str, Any] = {}
+    format_config: dict[str, Any] = {}
+    current_file_path: str | None = None
+    current_file_hash: str | None = None
+    download_url: str | None = None
+    created_at: str
+    updated_at: str
+    template: WritingTemplateRead | None = None
+
+
+class WritingGenerateRequest(ApiSchema):
+    action: str = "按要求写作"
+    instruction: str = ""
+    content: dict[str, Any] = {}
+    model: str = "Qwen3-30B-A3B-w8a8"
+    temperature: float = Field(default=0.2, ge=0, le=2)
+    top_p: float = Field(default=0.9, ge=0, le=1)
+    max_tokens: int = Field(default=2048, ge=1, le=8192)
+    user_id: str = "u-1001"
+
+
+class WritingGenerateResponse(ApiSchema):
+    document: WritingDocumentRead
+    output_text: str
+    proofread_results: list[dict[str, Any]] = []
+
+
+class WritingExportRequest(ApiSchema):
+    user_id: str = "u-1001"
+
+
 class OpsStatusRead(ApiSchema):
     database: str
     llm_gateway: str

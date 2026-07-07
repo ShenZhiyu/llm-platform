@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.routes import api_keys, approvals, audits, auth, chat, documents, health, knowledge_bases, llm_tasks, messages, model_configs, ops, reports, users
+from app.api.routes import api_keys, approvals, audits, auth, chat, documents, health, knowledge_bases, llm_tasks, messages, model_configs, ops, reports, users, writing
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
@@ -17,3 +17,4 @@ api_router.include_router(messages.router, prefix="/messages", tags=["messages"]
 api_router.include_router(ops.router, prefix="/ops", tags=["ops"])
 api_router.include_router(reports.router, prefix="/reports", tags=["reports"])
 api_router.include_router(llm_tasks.router, prefix="/llm-tasks", tags=["llm-tasks"])
+api_router.include_router(writing.router, prefix="/writing", tags=["writing"])

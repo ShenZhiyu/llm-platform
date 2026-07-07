@@ -39,6 +39,7 @@ from app.services.writing_service import (
     json_dumps,
     json_loads,
     normalize_content,
+    render_blank_document,
     render_document,
     save_template_upload,
 )
@@ -175,7 +176,7 @@ def document_to_read(document: WritingDocument, include_template: bool = True) -
 
 @router.get("/templates", response_model=list[WritingTemplateRead])
 def list_templates(db: Session = Depends(get_db)) -> list[WritingTemplateRead]:
-    templates = db.scalars(select(WritingTemplate).order_by(WritingTemplate.updated_at.desc())).all()
+    templates = db.scalars(select(WritingTemplate).where(WritingTemplate.status != "deleted").order_by(WritingTemplate.updated_at.desc())).all()
     return [template_to_read(template) for template in templates]
 
 
@@ -256,6 +257,17 @@ def update_template(template_id: str, payload: WritingTemplateUpdate, db: Sessio
     return template_to_read(template)
 
 
+@router.delete("/templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_template(template_id: str, db: Session = Depends(get_db)) -> None:
+    template = db.get(WritingTemplate, template_id)
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    template.status = "deleted"
+    template.updated_at = now_text()
+    write_audit(db, db.get(User, template.owner_id) if template.owner_id else None, "智能写作模板删除", template.name, AuditRisk.NORMAL, "模板已从列表中移除，历史草稿仍保留引用。")
+    db.commit()
+
+
 @router.get("/documents", response_model=list[WritingDocumentRead])
 def list_documents(user_id: str | None = None, db: Session = Depends(get_db)) -> list[WritingDocumentRead]:
     statement = select(WritingDocument).order_by(WritingDocument.updated_at.desc())
@@ -267,27 +279,28 @@ def list_documents(user_id: str | None = None, db: Session = Depends(get_db)) ->
 
 @router.post("/documents", response_model=WritingDocumentRead, status_code=status.HTTP_201_CREATED)
 def create_document(payload: WritingDocumentCreate, db: Session = Depends(get_db)) -> WritingDocumentRead:
-    template = db.get(WritingTemplate, payload.template_id)
-    if template is None:
+    template = db.get(WritingTemplate, payload.template_id) if payload.template_id else None
+    if payload.template_id and template is None:
         raise HTTPException(status_code=404, detail="Template not found")
-    fields = json_loads(template.fields_json, [])
+    fields = json_loads(template.fields_json, []) if template else []
     content = normalize_content(payload.content or content_from_fields(fields, payload.title), fields)
     if not content.get("title"):
         content["title"] = payload.title
     now = now_text()
     document = WritingDocument(
         id=new_id("wdoc"),
-        template_id=template.id,
+        template_id=template.id if template else None,
         owner_id=payload.user_id,
         title=payload.title or content.get("title") or "未命名文档",
         status="draft",
         content_json=json_dumps(content),
-        format_config_json=json_dumps(payload.format_config or json_loads(template.format_config_json, default_format_config())),
+        format_config_json=json_dumps(payload.format_config or (json_loads(template.format_config_json, default_format_config()) if template else default_format_config())),
         created_at=now,
         updated_at=now,
     )
     db.add(document)
-    write_audit(db, db.get(User, payload.user_id), "智能写作文档创建", document.title, AuditRisk.NORMAL, f"基于模板 {template.name} 创建草稿。")
+    detail = f"基于模板 {template.name} 创建草稿。" if template else "创建空白草稿。"
+    write_audit(db, db.get(User, payload.user_id), "智能写作文档创建", document.title, AuditRisk.NORMAL, detail)
     db.commit()
     db.refresh(document)
     return document_to_read(document)
@@ -301,7 +314,8 @@ def update_document(document_id: str, payload: WritingDocumentUpdate, db: Sessio
     if payload.title is not None:
         document.title = payload.title
     if payload.content is not None:
-        document.content_json = json_dumps(normalize_content(payload.content, json_loads(document.template.fields_json, [])))
+        fields = json_loads(document.template.fields_json, []) if document.template else []
+        document.content_json = json_dumps(normalize_content(payload.content, fields))
     if payload.format_config is not None:
         document.format_config_json = json_dumps(payload.format_config)
     if payload.status is not None:
@@ -312,13 +326,25 @@ def update_document(document_id: str, payload: WritingDocumentUpdate, db: Sessio
     return document_to_read(document)
 
 
+@router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_document(document_id: str, db: Session = Depends(get_db)) -> None:
+    document = db.get(WritingDocument, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    title = document.title
+    owner_id = document.owner_id
+    db.delete(document)
+    write_audit(db, db.get(User, owner_id) if owner_id else None, "智能写作草稿删除", title, AuditRisk.NORMAL, "草稿及其生成版本/AI操作记录已删除。")
+    db.commit()
+
+
 @router.post("/documents/{document_id}/generate", response_model=WritingGenerateResponse)
 def generate_document_content(document_id: str, payload: WritingGenerateRequest, db: Session = Depends(get_db)) -> WritingGenerateResponse:
     document = db.get(WritingDocument, document_id)
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
     template = document.template
-    fields = json_loads(template.fields_json, [])
+    fields = json_loads(template.fields_json, []) if template else []
     raw_content = payload.content or json_loads(document.content_json, {})
     current_content = normalize_content(raw_content, fields)
     non_editable_template_text = str(raw_content.get("_nonEditableTemplateText") or "").strip() if isinstance(raw_content, dict) else ""
@@ -401,7 +427,7 @@ def generate_document_content(document_id: str, payload: WritingGenerateRequest,
         "必须直接输出修改后的完整正文内容，不要输出 <body> 或 </body> 标签，不要只输出新增片段，不要只说明修改建议。\n"
         "不要输出思考过程，不要输出解释，不要输出 Markdown 代码块，不要添加“正文：”前缀，不要添加任何 XML/HTML 标签。\n"
         "如果需要修改标题，第一行使用“标题：xxx”，随后输出正文；否则只输出正文。\n"
-        f"模板名称：{template.name}\n"
+        f"模板名称：{template.name if template else '空白文稿'}\n"
         f"标签外不可修改模板内容，仅供上下文，不得输出：\n{non_editable_template_text}\n"
         f"操作：{payload.action}\n"
         f"用户写作要求：{payload.instruction}\n"
@@ -464,12 +490,19 @@ def export_document(document_id: str, payload: WritingExportRequest, db: Session
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
     template = document.template
-    path, digest = render_document(
-        template.original_file_path,
-        json_loads(document.content_json, {}),
-        document.title,
-        json_loads(document.format_config_json, {}),
-    )
+    if template:
+        path, digest = render_document(
+            template.original_file_path,
+            json_loads(document.content_json, {}),
+            document.title,
+            json_loads(document.format_config_json, {}),
+        )
+    else:
+        path, digest = render_blank_document(
+            json_loads(document.content_json, {}),
+            document.title,
+            json_loads(document.format_config_json, {}),
+        )
     version = len(document.versions) + 1
     document.current_file_path = path
     document.current_file_hash = digest

@@ -3,7 +3,6 @@ import {
   AlertTriangle,
   ArrowLeft,
   BookOpen,
-  Building2,
   CheckCircle2,
   ChevronRight,
   ClipboardList,
@@ -11,7 +10,6 @@ import {
   FileText,
   FlaskConical,
   Loader2,
-  MessageSquareText,
   PenTool,
   Plus,
   Save,
@@ -19,7 +17,6 @@ import {
   Sparkles,
   Trash2,
   Upload,
-  Wand2,
   X,
 } from 'lucide-react';
 import { useAppContext } from '../AppContext';
@@ -50,10 +47,9 @@ const defaultFormat: WritingFormatConfig = {
   allowUserFormat: false,
 };
 
-const categoryOptions = ['正式公文', '内部报告', '会议材料', '通用模板'];
+const categoryOptions = ['内部报告', '会议材料', '通用模板'];
 
 const categoryIcon: Record<string, ReactNode> = {
-  正式公文: <Building2 className="h-4 w-4" />,
   内部报告: <FlaskConical className="h-4 w-4" />,
   会议材料: <ClipboardList className="h-4 w-4" />,
   通用模板: <BookOpen className="h-4 w-4" />,
@@ -63,6 +59,12 @@ const statusTone: Record<string, string> = {
   draft: 'bg-violet-50 text-violet-700',
   generated: 'bg-emerald-50 text-emerald-700',
   archived: 'bg-slate-100 text-slate-700',
+};
+
+const statusLabel: Record<string, string> = {
+  draft: '草稿',
+  generated: '已生成',
+  archived: '已归档',
 };
 
 const fontSizeMap: Record<string, string> = {
@@ -87,6 +89,10 @@ function toCssFontSize(value?: string) {
 
 function titleOf(template: WritingTemplate) {
   return template.fields.find((field) => field.key === 'title')?.defaultValue || template.name || '未命名文档';
+}
+
+function displayCategory(category: string) {
+  return categoryOptions.includes(category) ? category : '通用模板';
 }
 
 function bodyOf(template: WritingTemplate) {
@@ -178,12 +184,7 @@ function deriveChapterPrompts(body: string): ChapterPrompt[] {
     .filter((line) => /^(\d+[.、．]|[一二三四五六七八九十]+[、.．])\s*\S+/.test(line))
     .slice(0, 12)
     .map((line, index) => ({ id: `chapter-${index + 1}`, title: line.replace(/^(\d+[.、．]|[一二三四五六七八九十]+[、.．])\s*/, '') }));
-  if (matched.length > 0) return matched;
-  return [
-    { id: 'chapter-1', title: '目标与范围' },
-    { id: 'chapter-2', title: '参考依据' },
-    { id: 'chapter-3', title: '术语定义' },
-  ];
+  return matched;
 }
 
 function isPlaceholderBody(value: string) {
@@ -324,9 +325,53 @@ export function Writing() {
   };
 
   const createBlank = async () => {
-    const fallback = templates[0];
-    if (!fallback) return;
-    await createFromTemplate(fallback);
+    if (!user) return;
+    setBusy('create:blank');
+    setError(null);
+    try {
+      const document = await backendApi.createWritingDocument({
+        templateId: null,
+        userId: user.id,
+        title: '未命名文档',
+        content: { title: '未命名文档', body: '' },
+        formatConfig: defaultFormat,
+      });
+      setActiveDocument(document);
+      await loadData();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '创建空白文稿失败');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const deleteTemplate = async (template: WritingTemplate) => {
+    if (!window.confirm(`确定删除模板“${template.name}”吗？历史草稿不会被删除。`)) return;
+    setBusy(`delete-template:${template.id}`);
+    setError(null);
+    try {
+      await backendApi.deleteWritingTemplate(template.id);
+      if (configTemplate?.id === template.id) setConfigTemplate(null);
+      await loadData();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '删除模板失败');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const deleteDocument = async (document: WritingDocument) => {
+    if (!window.confirm(`确定删除草稿“${document.title}”吗？`)) return;
+    setBusy(`delete-document:${document.id}`);
+    setError(null);
+    try {
+      await backendApi.deleteWritingDocument(document.id);
+      await loadData();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '删除草稿失败');
+    } finally {
+      setBusy(null);
+    }
   };
 
   if (activeDocument) {
@@ -354,6 +399,8 @@ export function Writing() {
       onCreateBlank={createBlank}
       onCreateFromTemplate={createFromTemplate}
       onOpenDocument={setActiveDocument}
+      onDeleteTemplate={deleteTemplate}
+      onDeleteDocument={deleteDocument}
       configTemplate={configTemplate}
       onConfigTemplate={setConfigTemplate}
       onCloseConfig={() => setConfigTemplate(null)}
@@ -372,6 +419,8 @@ function WritingHub({
   onCreateBlank,
   onCreateFromTemplate,
   onOpenDocument,
+  onDeleteTemplate,
+  onDeleteDocument,
   configTemplate,
   onConfigTemplate,
   onCloseConfig,
@@ -386,18 +435,25 @@ function WritingHub({
   onCreateBlank: () => Promise<void>;
   onCreateFromTemplate: (template: WritingTemplate) => Promise<void>;
   onOpenDocument: (document: WritingDocument) => void;
+  onDeleteTemplate: (template: WritingTemplate) => Promise<void>;
+  onDeleteDocument: (document: WritingDocument) => Promise<void>;
   configTemplate: WritingTemplate | null;
   onConfigTemplate: (template: WritingTemplate) => void;
   onCloseConfig: () => void;
 }) {
+  const [draftLimit, setDraftLimit] = useState(8);
+  useEffect(() => {
+    setDraftLimit((current) => Math.min(Math.max(current, 8), Math.max(documents.length, 8)));
+  }, [documents.length]);
   const grouped = useMemo(
     () =>
       categoryOptions
-        .map((category) => ({ category, items: templates.filter((template) => template.category === category) }))
+        .map((category) => ({ category, items: templates.filter((template) => displayCategory(template.category) === category) }))
         .filter((group) => group.items.length > 0),
     [templates],
   );
-  const firstTemplate = templates[0];
+  const visibleDocuments = documents.slice(0, draftLimit);
+  const hasMoreDocuments = draftLimit < documents.length;
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-[#f5f3fb] text-slate-900">
@@ -415,22 +471,14 @@ function WritingHub({
             </div>
             {error && <div className="mt-2 border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">{error}</div>}
           </div>
-          <div className="flex w-[620px] gap-2">
+          <div className="flex w-[420px] gap-2">
             <button
               className="flex flex-1 items-center justify-center gap-3 border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 hover:border-slate-300 disabled:opacity-50"
               onClick={() => void onCreateBlank()}
-              disabled={!firstTemplate || busy !== null}
+              disabled={busy !== null}
             >
               <FileText className="h-4 w-4" />
               空白文稿
-            </button>
-            <button
-              className="flex flex-1 items-center justify-center gap-3 bg-slate-700 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
-              onClick={() => firstTemplate && void onCreateFromTemplate(firstTemplate)}
-              disabled={!firstTemplate || busy !== null}
-            >
-              <Sparkles className="h-4 w-4" />
-              从模板创建
             </button>
             <UploadTemplatePanel userId={userId} onUploaded={onReload} />
           </div>
@@ -456,6 +504,7 @@ function WritingHub({
                         busy={busy === `create:${template.id}`}
                         onClick={() => void onCreateFromTemplate(template)}
                         onConfig={() => onConfigTemplate(template)}
+                        onDelete={() => void onDeleteTemplate(template)}
                       />
                     ))}
                   </div>
@@ -482,33 +531,52 @@ function WritingHub({
                     </tr>
                   </thead>
                   <tbody>
-                    {documents.slice(0, 8).map((document) => (
+                    {visibleDocuments.map((document) => (
                       <tr key={document.id} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" onClick={() => onOpenDocument(document)}>
                         <td className="px-3 py-2 font-medium text-slate-800">
                           <FileText className="mr-2 inline h-3.5 w-3.5 text-slate-500" />
                           {document.title}
                         </td>
-                        <td className="px-3 py-2 text-slate-600">{document.template?.name ?? document.templateId}</td>
+                        <td className="px-3 py-2 text-slate-600">{document.template?.name ?? '空白文稿'}</td>
                         <td className="px-3 py-2 text-slate-600">{document.updatedAt}</td>
                         <td className="px-3 py-2 text-right">
-                          <span className={cn('rounded px-2 py-0.5 text-[11px]', statusTone[document.status] ?? statusTone.draft)}>{document.status}</span>
+                          <span className={cn('rounded px-2 py-0.5 text-[11px]', statusTone[document.status] ?? statusTone.draft)}>
+                            {statusLabel[document.status] ?? document.status}
+                          </span>
+                          <button
+                            className="ml-2 rounded border border-red-100 bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-600 hover:border-red-300"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void onDeleteDocument(document);
+                            }}
+                          >
+                            删除
+                          </button>
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-                <button className="w-full border-t border-slate-100 py-2 text-sm font-semibold text-slate-700">加载更多草稿</button>
+                {documents.length > 8 && (
+                  <button
+                    className="w-full border-t border-slate-100 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
+                    disabled={!hasMoreDocuments}
+                    onClick={() => setDraftLimit((current) => Math.min(current + 8, documents.length))}
+                  >
+                    {hasMoreDocuments ? `加载更多草稿（${documents.length - draftLimit}）` : '已加载全部草稿'}
+                  </button>
+                )}
               </section>
             </>
           )}
         </div>
 
         <div className="min-h-0 space-y-3 overflow-auto">
-          {categoryOptions.slice(1).map((category) => (
+          {categoryOptions.map((category) => (
             <TemplateListPanel
               key={category}
               title={category}
-              templates={templates.filter((template) => template.category === category).slice(0, 6)}
+              templates={templates.filter((template) => displayCategory(template.category) === category).slice(0, 6)}
               onOpenTemplate={(template) => void onCreateFromTemplate(template)}
             />
           ))}
@@ -526,7 +594,10 @@ function WritingHub({
 }
 
 function UploadTemplatePanel({ userId, onUploaded }: { userId: string; onUploaded: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
+  const [category, setCategory] = useState('通用模板');
+  const [name, setName] = useState('');
   const [uploading, setUploading] = useState(false);
 
   const upload = async (targetFile = file) => {
@@ -534,12 +605,15 @@ function UploadTemplatePanel({ userId, onUploaded }: { userId: string; onUploade
     setUploading(true);
     try {
       await backendApi.uploadWritingTemplate(targetFile, {
-        name: targetFile.name.replace(/\.(doc|docx)$/i, ''),
-        category: '正式公文',
+        name: name.trim() || targetFile.name.replace(/\.(doc|docx)$/i, ''),
+        category,
         description: '',
         userId,
       });
       setFile(null);
+      setName('');
+      setCategory('通用模板');
+      setOpen(false);
       await onUploaded();
     } finally {
       setUploading(false);
@@ -547,21 +621,60 @@ function UploadTemplatePanel({ userId, onUploaded }: { userId: string; onUploade
   };
 
   return (
-    <label className="relative flex flex-1 cursor-pointer items-center justify-center gap-3 border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 hover:border-slate-400">
-      {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-      {file ? file.name : '上传模板'}
-      <input
-        className="absolute inset-0 cursor-pointer opacity-0"
-        type="file"
-        accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        disabled={uploading}
-        onChange={(event) => {
-          const selected = event.target.files?.[0] ?? null;
-          setFile(selected);
-          if (selected) setTimeout(() => void upload(selected), 0);
-        }}
-      />
-    </label>
+    <>
+      <button
+        className="flex flex-1 items-center justify-center gap-3 border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 hover:border-slate-400"
+        onClick={() => setOpen(true)}
+      >
+        <Upload className="h-4 w-4" />
+        上传模板
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
+          <div className="w-full max-w-md border border-slate-200 bg-white p-4 shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="text-sm font-bold">上传模板</div>
+              <button className="text-slate-500 hover:text-slate-800" onClick={() => setOpen(false)}>
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="mt-4 space-y-3 text-xs">
+              <label className="block">
+                <span className="mb-1 block font-semibold text-slate-600">模板分类</span>
+                <select className="w-full border border-slate-200 px-2 py-2" value={category} onChange={(event) => setCategory(event.target.value)}>
+                  {categoryOptions.map((item) => (
+                    <option key={item}>{item}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-1 block font-semibold text-slate-600">模板名称</span>
+                <input className="w-full border border-slate-200 px-2 py-2" value={name} onChange={(event) => setName(event.target.value)} placeholder="不填则使用文件名" />
+              </label>
+              <label className="block">
+                <span className="mb-1 block font-semibold text-slate-600">选择文件</span>
+                <input
+                  className="w-full border border-slate-200 bg-slate-50 px-2 py-2"
+                  type="file"
+                  accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                />
+              </label>
+              {file && <div className="rounded bg-slate-50 px-2 py-1 text-slate-600">已选择：{file.name}</div>}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button className="border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600" onClick={() => setOpen(false)}>
+                取消
+              </button>
+              <button className="flex items-center gap-2 bg-slate-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={!file || uploading} onClick={() => void upload()}>
+                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                确认上传
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -707,7 +820,7 @@ function WritingEditor({
           <ArrowLeft className="h-4 w-4" />
           返回模板中心
         </button>
-        <div className="min-w-0 truncate text-sm font-semibold text-slate-700">{document.template?.name ?? document.templateId}</div>
+        <div className="min-w-0 truncate text-sm font-semibold text-slate-700">{document.template?.name ?? '空白文稿'}</div>
         <div className="flex gap-2">
           <button className="flex items-center gap-1 border border-slate-200 px-2 py-1 text-xs font-semibold" disabled={busy === 'save'} onClick={() => void save()}>
             {busy === 'save' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
@@ -788,6 +901,11 @@ function WritingEditor({
                   <Plus className="h-3.5 w-3.5" />
                 </button>
               </div>
+              {chapters.length === 0 && (
+                <div className="mb-2 border border-dashed border-slate-200 bg-slate-50 px-2 py-2 text-[11px] leading-4 text-slate-500">
+                  暂无章节。需要让 AI 按章节写作时，请点击“添加章节”手动添加。
+                </div>
+              )}
               {chapters.map((chapter, index) => (
                 <div key={chapter.id} className="mb-1 flex items-center gap-1 bg-[#ebe9f6] px-2 py-1.5 font-medium text-slate-700">
                   <span className="shrink-0">{index + 1}.</span>
@@ -936,12 +1054,14 @@ function TemplatePreviewCard({
   busy,
   onClick,
   onConfig,
+  onDelete,
 }: {
   key?: string;
   template: WritingTemplate;
   busy: boolean;
   onClick: () => void;
   onConfig: () => void;
+  onDelete: () => void;
 }) {
   return (
     <div className="group border border-slate-200 bg-[#f7f6fb] p-2 text-left hover:border-orange-400 hover:bg-white">
@@ -954,6 +1074,10 @@ function TemplatePreviewCard({
       </button>
       <button className="mt-2 w-full border border-slate-200 bg-white py-1.5 text-xs font-semibold text-slate-600 hover:border-blue-300 hover:text-blue-700" onClick={onConfig}>
         设置模板格式
+      </button>
+      <button className="mt-2 flex w-full items-center justify-center gap-1 border border-red-100 bg-red-50 py-1.5 text-xs font-semibold text-red-600 hover:border-red-300" onClick={onDelete}>
+        <Trash2 className="h-3.5 w-3.5" />
+        删除模板
       </button>
     </div>
   );

@@ -362,7 +362,7 @@ class WritingTemplateVersion(Base):
     __tablename__ = "writing_template_versions"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    template_id: Mapped[str] = mapped_column(ForeignKey("writing_templates.id"), nullable=False)
+    template_id: Mapped[str | None] = mapped_column(ForeignKey("writing_templates.id"), nullable=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
     file_path: Mapped[str] = mapped_column(String(500), nullable=False)
     file_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -389,7 +389,7 @@ class WritingDocument(Base):
     created_at: Mapped[str] = mapped_column(String(40), nullable=False)
     updated_at: Mapped[str] = mapped_column(String(40), nullable=False)
 
-    template: Mapped[WritingTemplate] = relationship(back_populates="documents")
+    template: Mapped[WritingTemplate | None] = relationship(back_populates="documents")
     versions: Mapped[list["WritingDocumentVersion"]] = relationship(back_populates="document", cascade="all, delete-orphan")
     ai_operations: Mapped[list["WritingAIOperation"]] = relationship(back_populates="document", cascade="all, delete-orphan")
 

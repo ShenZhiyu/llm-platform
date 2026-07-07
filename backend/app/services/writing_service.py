@@ -355,3 +355,18 @@ def render_document(template_path: str, content: dict, title: str, format_config
     output_path = DOCUMENT_STORAGE / f"{new_id('wdocfile')}_{data.get('title') or title or 'document'}.docx"
     document.save(output_path)
     return str(output_path), file_sha256(output_path)
+
+
+def render_blank_document(content: dict, title: str, format_config: dict | None = None) -> tuple[str, str]:
+    ensure_writing_storage()
+    data = normalize_content(content)
+    document = Document()
+    if data.get("title") or title:
+        title_paragraph = document.add_paragraph(data.get("title") or title)
+        _apply_paragraph_format(title_paragraph, "title", format_config)
+    for line in (data.get("body") or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        paragraph = document.add_paragraph(line)
+        _apply_paragraph_format(paragraph, "body", format_config)
+    output_path = DOCUMENT_STORAGE / f"{new_id('wdocfile')}_{data.get('title') or title or 'blank'}.docx"
+    document.save(output_path)
+    return str(output_path), file_sha256(output_path)

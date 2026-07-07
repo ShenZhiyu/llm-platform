@@ -330,7 +330,7 @@ class WritingTemplateUpdate(ApiSchema):
 
 
 class WritingDocumentCreate(ApiSchema):
-    template_id: str
+    template_id: str | None = None
     user_id: str = "u-1001"
     title: str = "未命名文档"
     content: dict[str, Any] = {}
@@ -346,7 +346,7 @@ class WritingDocumentUpdate(ApiSchema):
 
 class WritingDocumentRead(ApiSchema):
     id: str
-    template_id: str
+    template_id: str | None = None
     owner_id: str | None = None
     title: str
     status: str

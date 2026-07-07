@@ -235,7 +235,7 @@ export type WritingTemplate = {
 
 export type WritingDocument = {
   id: string;
-  templateId: string;
+  templateId?: string | null;
   ownerId?: string | null;
   title: string;
   status: string;

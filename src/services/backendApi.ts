@@ -566,11 +566,15 @@ export const backendApi = {
     return request<WritingTemplate>(`/writing/templates/${templateId}`, { method: 'PATCH', body: JSON.stringify(payload) });
   },
 
+  async deleteWritingTemplate(templateId: string) {
+    return request<void>(`/writing/templates/${templateId}`, { method: 'DELETE' });
+  },
+
   async listWritingDocuments(userId?: string) {
     return request<WritingDocument[]>(`/writing/documents${userId ? `?user_id=${encodeURIComponent(userId)}` : ''}`);
   },
 
-  async createWritingDocument(payload: { templateId: string; userId: string; title: string; content?: Record<string, unknown>; formatConfig?: WritingFormatConfig }) {
+  async createWritingDocument(payload: { templateId?: string | null; userId: string; title: string; content?: Record<string, unknown>; formatConfig?: WritingFormatConfig }) {
     return request<WritingDocument>('/writing/documents', { method: 'POST', body: JSON.stringify(payload) });
   },
 
@@ -579,6 +583,10 @@ export const backendApi = {
     payload: { title?: string; content?: Record<string, unknown>; formatConfig?: WritingFormatConfig; status?: string },
   ) {
     return request<WritingDocument>(`/writing/documents/${documentId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+  },
+
+  async deleteWritingDocument(documentId: string) {
+    return request<void>(`/writing/documents/${documentId}`, { method: 'DELETE' });
   },
 
   async generateWritingDocument(

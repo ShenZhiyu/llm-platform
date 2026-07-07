@@ -1,3 +1,5 @@
+"""登录、登出和当前会话接口。"""
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session

@@ -1,3 +1,5 @@
+"""用户列表和用户信息接口。"""
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session

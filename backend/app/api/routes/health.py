@@ -1,3 +1,5 @@
+"""健康检查接口。"""
+
 from datetime import datetime
 
 from fastapi import APIRouter

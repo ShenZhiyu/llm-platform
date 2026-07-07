@@ -1,3 +1,5 @@
+"""统计报表接口，聚合聊天、知识库、审批和模型调用指标。"""
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session

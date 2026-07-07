@@ -1,3 +1,8 @@
+"""认证与权限辅助函数。
+
+负责 token 生成/校验、当前用户解析以及角色权限依赖。
+"""
+
 import hashlib
 import secrets
 from datetime import datetime, timedelta
@@ -12,10 +17,12 @@ from app.models import AuthSession, RoleName, User
 
 
 def hash_secret(value: str) -> str:
+    """对 token/密码等敏感字符串做 SHA-256 哈希。"""
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def verify_secret(value: str, hashed: str) -> bool:
+    """使用常量时间比较校验明文和哈希。"""
     return bool(hashed) and secrets.compare_digest(hash_secret(value), hashed)
 
 
@@ -32,6 +39,7 @@ def get_current_user(
     authorization: str | None = Header(None),
     db: Session = Depends(get_db),
 ) -> User:
+    """从 Bearer Token 解析当前用户，供需要登录的接口依赖注入。"""
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token")
     token = authorization.split(" ", 1)[1].strip()
@@ -58,6 +66,7 @@ def user_has_role(user: User, *roles: RoleName) -> bool:
 
 
 def require_roles(*roles: RoleName):
+    """生成角色权限依赖，用于限制特定接口访问。"""
     def dependency(user: User = Depends(get_current_user)) -> User:
         if not user_has_role(user, *roles):
             raise HTTPException(status_code=403, detail="Insufficient role permissions")

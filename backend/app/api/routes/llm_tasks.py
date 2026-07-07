@@ -1,3 +1,5 @@
+"""通用大模型任务接口，用于写作等非聊天类异步/同步任务记录。"""
+
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, status

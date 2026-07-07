@@ -1,3 +1,5 @@
+"""聊天会话、消息发送、流式响应和重试编辑接口。"""
+
 import json
 from time import perf_counter
 from typing import Any

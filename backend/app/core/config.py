@@ -1,3 +1,8 @@
+"""应用配置。
+
+通过 Pydantic Settings 从环境变量/.env 读取数据库、模型网关、RAG 等运行参数。
+"""
+
 from functools import lru_cache
 
 from pydantic import Field
@@ -5,6 +10,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """后端运行时配置项。字段名可直接映射到 .env 中的同名环境变量。"""
+
     app_name: str = "LLM Platform API"
     environment: str = "development"
     api_v1_prefix: str = "/api/v1"
@@ -34,9 +41,11 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins(self) -> list[str]:
+        """把逗号分隔的 CORS 配置转换为 FastAPI 需要的列表。"""
         return [origin.strip() for origin in self.backend_cors_origins.split(",") if origin.strip()]
 
 
 @lru_cache
 def get_settings() -> Settings:
+    """缓存配置对象，避免每次依赖注入都重复读取 .env。"""
     return Settings()

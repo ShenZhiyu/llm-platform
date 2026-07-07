@@ -1,3 +1,8 @@
+"""本地演示数据初始化。
+
+启动应用时调用，确保角色、用户、模型、知识库等基础数据存在。
+"""
+
 import hashlib
 from datetime import datetime
 from pathlib import Path
@@ -38,6 +43,7 @@ from app.models import (
 
 
 def now_text() -> str:
+    """返回数据库中统一使用的时间字符串。"""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
@@ -269,6 +275,7 @@ def sync_real_seed_documents(db: Session) -> None:
 
 
 def seed_demo_data(db: Session) -> None:
+    """幂等写入演示数据；已存在的数据不会重复创建。"""
     settings = get_settings()
     if db.scalar(select(Role).limit(1)):
         ensure_merged_default_roles(db)

@@ -1,3 +1,8 @@
+"""大模型网关客户端。
+
+封装 OpenAI-compatible chat/completions、流式输出和 token 统计接口。
+"""
+
 from dataclasses import dataclass
 import json
 from typing import Any, Iterator
@@ -8,11 +13,15 @@ from app.core.config import get_settings
 
 
 class LLMClientError(RuntimeError):
+    """模型网关调用失败或返回结构异常。"""
+
     pass
 
 
 @dataclass(frozen=True)
 class LLMCompletion:
+    """一次非流式模型回复的标准化结果。"""
+
     content: str
     model: str
     raw: dict[str, Any]
@@ -38,6 +47,8 @@ class LLMTokenCount:
 
 
 class LLMClient:
+    """根据配置选择文本/视觉模型网关并发起请求。"""
+
     def __init__(
         self,
         base_url: str | None = None,
@@ -62,6 +73,7 @@ class LLMClient:
         max_tokens: int = 2048,
         enable_thinking: bool = True,
     ) -> LLMCompletion:
+        """调用非流式对话补全接口。"""
         model_id, base_url, api_key = self._resolve_target(model)
         headers = {"Content-Type": "application/json"}
         if api_key:
@@ -117,6 +129,7 @@ class LLMClient:
         max_tokens: int = 2048,
         enable_thinking: bool = True,
     ) -> Iterator[LLMStreamChunk]:
+        """调用流式对话补全接口，逐块返回内容和思考过程。"""
         model_id, base_url, api_key = self._resolve_target(model)
         headers = {"Content-Type": "application/json"}
         if api_key:

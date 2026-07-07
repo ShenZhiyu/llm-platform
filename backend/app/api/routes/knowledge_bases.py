@@ -1,3 +1,5 @@
+"""知识库列表、详情和访问授权相关接口。"""
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session

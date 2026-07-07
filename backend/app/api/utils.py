@@ -1,3 +1,5 @@
+"""API 层通用工具函数。"""
+
 import json
 from datetime import datetime
 from uuid import uuid4
@@ -9,14 +11,17 @@ from app.schemas import ChatAttachmentRead, ChatMessageRead, Citation
 
 
 def now_text() -> str:
+    """返回统一格式的当前时间字符串。"""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def new_id(prefix: str) -> str:
+    """生成带业务前缀的短 ID。"""
     return f"{prefix}-{uuid4().hex[:10]}"
 
 
 def write_audit(db: Session, user: User | None, action: str, resource: str, risk: AuditRisk, detail: str) -> AuditLog:
+    """写入审计日志；调用方负责最终 commit。"""
     log = AuditLog(
         id=new_id("aud"),
         time=now_text(),
@@ -33,6 +38,7 @@ def write_audit(db: Session, user: User | None, action: str, resource: str, risk
 
 
 def parse_message(message) -> ChatMessageRead:
+    """把数据库 ChatMessage 转换为前端响应模型。"""
     raw = json.loads(message.citations_json or "[]")
     image_raw = json.loads(getattr(message, "images_json", "[]") or "[]")
     attachment_raw = json.loads(getattr(message, "attachments_json", "[]") or "[]")

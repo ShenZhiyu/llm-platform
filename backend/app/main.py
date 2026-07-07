@@ -1,3 +1,8 @@
+"""FastAPI 应用入口。
+
+负责创建应用实例、注册中间件/路由、统一异常响应，并在启动时初始化数据库和演示数据。
+"""
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -15,6 +20,10 @@ from app.seed import seed_demo_data
 
 
 def ensure_runtime_schema() -> None:
+    """兼容本地旧 SQLite 数据库，补齐缺失字段。
+
+    正式环境应优先使用 Alembic 迁移；这里主要用于开发环境中已有数据库的平滑升级。
+    """
     inspector = inspect(engine)
     if "chat_sessions" not in inspector.get_table_names():
         return
@@ -108,6 +117,7 @@ def ensure_runtime_schema() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """应用启动生命周期：建表、补字段、写入演示数据。"""
     Base.metadata.create_all(bind=engine)
     ensure_runtime_schema()
     with SessionLocal() as db:
@@ -129,16 +139,19 @@ app.add_middleware(
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
+    """统一 HTTPException 的错误响应结构。"""
     return JSONResponse(status_code=exc.status_code, content={"error": {"code": exc.status_code, "message": exc.detail}})
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """统一请求参数校验错误响应。"""
     return JSONResponse(status_code=422, content={"error": {"code": 422, "message": "Validation error", "details": exc.errors()}})
 
 
 @app.exception_handler(SQLAlchemyError)
 async def database_exception_handler(request: Request, exc: SQLAlchemyError):
+    """避免数据库异常细节直接暴露给前端。"""
     return JSONResponse(status_code=500, content={"error": {"code": 500, "message": "Database error"}})
 
 

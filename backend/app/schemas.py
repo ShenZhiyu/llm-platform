@@ -1,3 +1,8 @@
+"""API 请求/响应 Schema。
+
+Pydantic 模型负责接口数据校验和 snake_case <-> camelCase 字段转换。
+"""
+
 from datetime import datetime
 from typing import Any
 
@@ -20,11 +25,14 @@ from app.models import (
 
 
 def to_camel(value: str) -> str:
+    """把 Python 字段名转换为前端常用的 camelCase。"""
     parts = value.split("_")
     return parts[0] + "".join(part.capitalize() for part in parts[1:])
 
 
 class ApiSchema(BaseModel):
+    """所有接口 Schema 的统一基类。"""
+
     model_config = ConfigDict(from_attributes=True, populate_by_name=True, alias_generator=to_camel)
 
 
@@ -48,6 +56,8 @@ class UserRead(ApiSchema):
 
 
 class LoginRequest(ApiSchema):
+    """登录请求参数。默认值用于本地演示环境快速登录。"""
+
     username: str = "u-1001"
     password: str = "123456"
     role: RoleName | None = None
@@ -280,6 +290,8 @@ class CodeEditResponse(ApiSchema):
 
 
 class WritingTemplateField(ApiSchema):
+    """智能写作模板字段配置，目前主要用于 title/body 两个区域。"""
+
     key: str
     label: str
     placeholder: str
@@ -330,6 +342,8 @@ class WritingTemplateUpdate(ApiSchema):
 
 
 class WritingDocumentCreate(ApiSchema):
+    """创建智能写作文档；template_id 为空时创建无模板空白文稿。"""
+
     template_id: str | None = None
     user_id: str = "u-1001"
     title: str = "未命名文档"
@@ -361,6 +375,8 @@ class WritingDocumentRead(ApiSchema):
 
 
 class WritingGenerateRequest(ApiSchema):
+    """智能写作 AI 操作请求，如按要求写作、润色、扩写、校对。"""
+
     action: str = "按要求写作"
     instruction: str = ""
     content: dict[str, Any] = {}
@@ -470,6 +486,8 @@ class ChatSessionCreate(ApiSchema):
 
 
 class ChatMessageCreate(ApiSchema):
+    """创建聊天消息的请求体，包含模型参数和知识库/附件上下文。"""
+
     content: str
     model: str = "Qwen3-30B-A3B-w8a8"
     temperature: float = Field(default=0.2, ge=0, le=2)

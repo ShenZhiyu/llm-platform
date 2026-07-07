@@ -1,3 +1,5 @@
+"""运维看板接口，返回数据库、模型网关、索引等运行状态。"""
+
 from pathlib import Path
 
 from fastapi import APIRouter, Depends

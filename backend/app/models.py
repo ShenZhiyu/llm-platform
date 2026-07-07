@@ -1,3 +1,8 @@
+"""数据库 ORM 模型定义。
+
+这里集中定义用户/权限、知识库、审批、聊天、智能写作等业务表结构和关系。
+"""
+
 from datetime import datetime
 from enum import StrEnum
 
@@ -8,6 +13,8 @@ from app.db.base import Base
 
 
 class RoleName(StrEnum):
+    """系统内置角色枚举，用于前后端权限控制。"""
+
     NORMAL_USER = "普通用户"
     RESEARCHER = "科研人员"
     KB_ADMIN = "知识库管理员"
@@ -105,6 +112,8 @@ class Role(Base):
 
 
 class User(Base):
+    """平台用户。当前登录、角色权限和审计都会关联到用户。"""
+
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -133,6 +142,8 @@ class ModelConfig(Base):
 
 
 class KnowledgeBase(Base):
+    """知识库元数据。文档、分块和检索权限都归属到知识库。"""
+
     __tablename__ = "knowledge_bases"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -149,6 +160,8 @@ class KnowledgeBase(Base):
 
 
 class KnowledgeDocument(Base):
+    """知识库文件记录，保存上传文件和索引状态。"""
+
     __tablename__ = "knowledge_documents"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -287,6 +300,8 @@ class LLMTask(Base):
 
 
 class ChatSession(Base):
+    """一次聊天会话，包含模型参数和关联消息。"""
+
     __tablename__ = "chat_sessions"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -308,6 +323,8 @@ class ChatSession(Base):
 
 
 class ChatMessage(Base):
+    """聊天消息，保存用户/助手内容、推理过程、引用和反馈。"""
+
     __tablename__ = "chat_messages"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -335,6 +352,8 @@ class ChatMessage(Base):
 
 
 class WritingTemplate(Base):
+    """智能写作 Word 模板。原始文件存文件系统，结构化元数据存数据库。"""
+
     __tablename__ = "writing_templates"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -375,6 +394,8 @@ class WritingTemplateVersion(Base):
 
 
 class WritingDocument(Base):
+    """智能写作草稿/生成文档。可关联模板，也支持无模板空白文稿。"""
+
     __tablename__ = "writing_documents"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)

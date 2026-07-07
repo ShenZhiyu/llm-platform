@@ -1,3 +1,5 @@
+"""模型配置查询与维护接口。"""
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session

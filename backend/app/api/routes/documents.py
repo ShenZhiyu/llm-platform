@@ -1,3 +1,5 @@
+"""知识库文档上传、入库审核和检索状态接口。"""
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session

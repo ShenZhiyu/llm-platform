@@ -1,3 +1,8 @@
+"""智能写作接口。
+
+包含模板上传/管理、草稿管理、AI 生成/校对和 Word 导出。
+"""
+
 import json
 import re
 from pathlib import Path

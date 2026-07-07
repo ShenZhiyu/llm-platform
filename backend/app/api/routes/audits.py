@@ -1,3 +1,5 @@
+"""审计日志查询接口。"""
+
 from fastapi import APIRouter, Depends, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session

@@ -1,3 +1,8 @@
+"""知识库 RAG 服务。
+
+负责文件保存、文本切分、向量化、检索和重排，是知识库问答的核心服务层。
+"""
+
 import hashlib
 import mimetypes
 import re
@@ -18,10 +23,14 @@ from app.schemas import KnowledgeSearchResult
 
 
 class RAGServiceError(RuntimeError):
+    """知识库处理、向量化或检索失败。"""
+
     pass
 
 
 class OpenAIEmbeddingFunction:
+    """适配 Chroma/向量库使用的 OpenAI-compatible embedding 函数。"""
+
     def __init__(self) -> None:
         settings = get_settings()
         self.base_url = settings.rag_embedding_api_base_url.rstrip("/")
@@ -60,6 +69,7 @@ class StoredUpload:
 
 
 def storage_root() -> Path:
+    """确保上传文件存储目录存在并返回根目录。"""
     root = Path(get_settings().storage_dir)
     root.mkdir(parents=True, exist_ok=True)
     (root / "uploads").mkdir(parents=True, exist_ok=True)
@@ -67,6 +77,7 @@ def storage_root() -> Path:
 
 
 def save_upload(file: UploadFile, knowledge_base_id: str) -> StoredUpload:
+    """保存上传文件并计算基础元数据。"""
     suffix = Path(file.filename or "upload.txt").suffix.lower()
     safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", Path(file.filename or "upload.txt").name)
     target_dir = storage_root() / "uploads" / knowledge_base_id

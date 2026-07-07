@@ -1,3 +1,8 @@
+"""智能写作 Word 模板处理服务。
+
+负责模板上传、.doc 转 .docx、解析 <title>/<body>、渲染生成 Word 文件。
+"""
+
 import hashlib
 import json
 import re
@@ -24,6 +29,8 @@ PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*(title|body)\s*\}\}", re.IGNORECASE)
 
 
 class WritingServiceError(Exception):
+    """模板解析、转换或渲染失败。"""
+
     pass
 
 
@@ -36,11 +43,13 @@ class StoredUpload:
 
 
 def ensure_writing_storage() -> None:
+    """确保模板文件和生成文档的本地存储目录存在。"""
     TEMPLATE_STORAGE.mkdir(parents=True, exist_ok=True)
     DOCUMENT_STORAGE.mkdir(parents=True, exist_ok=True)
 
 
 def file_sha256(path: Path) -> str:
+    """计算文件 SHA-256，用于去重和版本记录。"""
     digest = hashlib.sha256()
     with path.open("rb") as file:
         for chunk in iter(lambda: file.read(1024 * 1024), b""):
@@ -49,6 +58,7 @@ def file_sha256(path: Path) -> str:
 
 
 def convert_doc_to_docx(source: Path) -> Path:
+    """.doc 模板通过 LibreOffice 转换为 .docx 后再解析。"""
     converter = shutil.which("soffice") or shutil.which("libreoffice")
     if converter is None:
         raise WritingServiceError("上传 .doc 模板需要服务器安装 LibreOffice，并确保 soffice/libreoffice 在 PATH 中。")
@@ -67,6 +77,7 @@ def convert_doc_to_docx(source: Path) -> Path:
 
 
 def save_template_upload(file: UploadFile) -> StoredUpload:
+    """保存上传的 Word 模板并校验文件可解析。"""
     ensure_writing_storage()
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in {".doc", ".docx"}:
@@ -337,6 +348,7 @@ def _replace_placeholder(document: Document, field_key: str, text: str, format_c
 
 
 def render_document(template_path: str, content: dict, title: str, format_config: dict | None = None) -> tuple[str, str]:
+    """按模板替换 title/body 并生成最终 Word 文件。"""
     ensure_writing_storage()
     document = Document(template_path)
     data = normalize_content(content)
@@ -358,6 +370,7 @@ def render_document(template_path: str, content: dict, title: str, format_config
 
 
 def render_blank_document(content: dict, title: str, format_config: dict | None = None) -> tuple[str, str]:
+    """无模板空白文稿导出：创建普通 Word 文件并写入标题/正文。"""
     ensure_writing_storage()
     data = normalize_content(content)
     document = Document()

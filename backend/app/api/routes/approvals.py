@@ -1,3 +1,5 @@
+"""审批流接口，用于知识库访问、文档入库等人工审核场景。"""
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session

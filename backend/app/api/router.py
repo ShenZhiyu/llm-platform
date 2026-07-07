@@ -1,3 +1,8 @@
+"""API 路由聚合。
+
+所有业务路由在这里统一挂载到 /api/v1 前缀下。
+"""
+
 from fastapi import APIRouter
 
 from app.api.routes import api_keys, approvals, audits, auth, chat, documents, health, knowledge_bases, llm_tasks, messages, model_configs, ops, reports, users, writing

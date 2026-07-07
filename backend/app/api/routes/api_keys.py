@@ -1,3 +1,5 @@
+"""API Key 管理接口。"""
+
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, status

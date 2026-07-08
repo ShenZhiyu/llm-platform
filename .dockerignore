@@ -1,0 +1,13 @@
+.git
+.idea
+node_modules
+dist
+.env
+.env.local
+backend/.venv
+backend/.pytest_cache
+backend/storage/*
+!backend/storage/seed_documents/
+!backend/storage/seed_documents/**
+backend/**/*.pyc
+backend/**/__pycache__

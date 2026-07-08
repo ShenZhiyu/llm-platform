@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     api_v1_prefix: str = "/api/v1"
     database_url: str = "sqlite:///./backend/storage/llm_platform.db"
-    backend_cors_origins: str = Field(default="http://127.0.0.1:3001,http://localhost:3001")
+    backend_cors_origins: str = Field(default="*")
     llm_api_base_url: str = "http://192.168.10.101:8000/v1"
     llm_api_key: str = "dummy"
     llm_model_id: str = "Qwen3-30B-A3B-w8a8"
